@@ -1,0 +1,73 @@
+# ==========================================
+# Light Memory Challenge (LMC) - .gitignore
+# ==========================================
+
+# --- Python / FastAPI Backend ---
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Python Virtual Environments ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Secrets and Environment Variables ---
+.env
+.env.*
+!.env.example
+
+# --- Local Databases and Logs ---
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
+# --- IDE and Editor Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Operating System Files ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Build and Generated Files ---
+build/
+dist/
+.cache/
+temp/
+tmp/
+
+# --- Arduino IDE ---
+# Ignore compiled firmware and build outputs
+*.hex
+*.elf
+*.bin
+*.eep
+*.map
+*.o
+*.a
+
+# Arduino IDE local project files
+*.ino.cpp
+*.ino.with_bootloader.bin
+*.ino.bootloader.bin
+
+# --- PlatformIO (optional; harmless if unused) ---
+.pio/
+
+# --- Node.js (only if added later) ---
+node_modules/
+
+# --- Generated test / debug output ---
+test-results/

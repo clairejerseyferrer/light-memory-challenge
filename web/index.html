@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Light Memory Challenge</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10131b;
+        --panel: #1a2030;
+        --text: #f4f6fb;
+        --muted: #aab4c8;
+        --accent: #a5b4fc;
+        --border: #343d54;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 18px;
+        background: radial-gradient(circle at top, #202b48, var(--bg) 55%);
+        color: var(--text);
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        width: min(100%, 760px);
+        margin: auto;
+      }
+      .eyebrow,
+      .label {
+        color: var(--muted);
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .eyebrow {
+        color: var(--accent);
+        font-weight: 800;
+      }
+      h1 {
+        font-size: clamp(1.8rem, 5vw, 2.5rem);
+        line-height: 1.1;
+      }
+      .panel,
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 17px;
+        padding: 18px;
+        margin: 12px 0;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin: 20px 0;
+      }
+      .tab,
+      button {
+        border: 0;
+        border-radius: 11px;
+        padding: 12px 15px;
+        font: inherit;
+        font-weight: 750;
+        cursor: pointer;
+      }
+      .tab {
+        flex: 1;
+        background: #303951;
+        color: white;
+      }
+      .tab.active,
+      button.primary {
+        background: var(--accent);
+        color: #111526;
+      }
+      button.secondary {
+        background: #303951;
+        color: white;
+      }
+      button.full {
+        width: 100%;
+        margin-top: 12px;
+      }
+      button:disabled {
+        opacity: 0.5;
+      }
+      input {
+        width: 100%;
+        padding: 13px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #111724;
+        color: white;
+        font: inherit;
+      }
+      label {
+        display: block;
+        margin: 12px 0 7px;
+        font-weight: 700;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .muted,
+      .message {
+        color: var(--muted);
+      }
+      .sessionid {
+        font-size: 1.4rem;
+        font-weight: 900;
+        color: var(--accent);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .stat {
+        background: #111724;
+        border: 1px solid var(--border);
+        border-radius: 11px;
+        padding: 13px;
+        overflow-wrap: anywhere;
+      }
+      .stat strong {
+        display: block;
+        font-size: 1.25rem;
+      }
+      .countdown {
+        font-size: 4rem;
+        font-weight: 900;
+        text-align: center;
+      }
+      .pill {
+        border-radius: 99px;
+        background: #303951;
+        padding: 4px 8px;
+        font-size: 0.8rem;
+      }
+      .recommendation {
+        padding: 10px;
+        border-left: 3px solid var(--accent);
+        background: #111724;
+        margin: 8px 0;
+      }
+      .small {
+        font-size: 0.82rem;
+      }
+      @media (max-width: 480px) {
+        .tabs {
+          flex-direction: column;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">IoT Laboratory Game</div>
+      <h1>Light Memory Challenge</h1>
+      <p class="muted">
+        Start a game or search for previous sessions using your codename.
+      </p>
+      <nav class="tabs">
+        <button class="tab active" id="tabStart">Start a Game</button
+        ><button class="tab" id="tabSearch">Find My Sessions</button>
+      </nav>
+      <section class="panel" id="startView">
+        <h2>New session</h2>
+        <p class="muted">Create a readable session ID using your codename.</p>
+        <form id="createForm">
+          <label for="codename">Player codename</label
+          ><input
+            id="codename"
+            minlength="2"
+            maxlength="24"
+            pattern="[A-Za-z0-9 _-]+"
+            placeholder="e.g. StarPlayer"
+            required
+          /><button class="primary full" id="createButton">
+            Create Session
+          </button>
+        </form>
+        <div id="sessionArea" class="hidden">
+          <div class="card">
+            <div class="label">Session ID</div>
+            <div class="sessionid" id="displayId"></div>
+            <div class="label">Codename</div>
+            <strong id="playerName"></strong>
+          </div>
+          <button class="secondary full" id="copyButton">Copy Session ID</button
+          ><button class="primary full" id="startButton">START GAME</button>
+          <div class="countdown hidden" id="countdown">5</div>
+          <p id="status" class="message" role="status" aria-live="polite"></p>
+          <div id="finalResults" class="hidden"></div>
+        </div>
+      </section>
+      <section class="panel hidden" id="searchView">
+        <h2>Find My Sessions</h2>
+        <p class="muted">
+          Search for an exact codename. Search is case-insensitive.
+        </p>
+        <form id="searchForm">
+          <label for="searchCodename">Codename</label
+          ><input
+            id="searchCodename"
+            minlength="2"
+            maxlength="24"
+            required
+          /><button class="primary full" id="searchButton">
+            Search Sessions
+          </button>
+        </form>
+        <p id="searchMessage" class="message"></p>
+        <div id="sessionList"></div>
+        <div id="performanceView" class="hidden"></div>
+      </section>
+      <p class="small muted">
+        Use a codename, not your real name. This prototype lets anyone who knows
+        a codename search its sessions.
+      </p>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let sid = null,
+        poll = null,
+        timer = null;
+      async function api(path, opts = {}) {
+        const r = await fetch(path, {
+          ...opts,
+          headers: {
+            "Content-Type": "application/json",
+            ...(opts.headers || {}),
+          },
+        });
+        const b = await r.json().catch(() => ({}));
+        if (!r.ok) throw Error(b.detail || `Request failed (${r.status})`);
+        return b;
+      }
+      function esc(s) {
+        return String(s ?? "").replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      }
+      function stopTimers() {
+        if (poll) clearInterval(poll);
+        if (timer) clearInterval(timer);
+        poll = timer = null;
+      }
+      function tab(which) {
+        const start = which === "start";
+        $("startView").classList.toggle("hidden", !start);
+        $("searchView").classList.toggle("hidden", start);
+        $("tabStart").classList.toggle("active", start);
+        $("tabSearch").classList.toggle("active", !start);
+      }
+      $("tabStart").onclick = () => tab("start");
+      $("tabSearch").onclick = () => tab("search");
+      $("createForm").onsubmit = async (e) => {
+        e.preventDefault();
+        $("createButton").disabled = true;
+        try {
+          const d = await api("/api/sessions", {
+            method: "POST",
+            body: JSON.stringify({ codename: $("codename").value.trim() }),
+          });
+          sid = d.session_id;
+          $("displayId").textContent = d.display_id;
+          $("playerName").textContent = d.codename;
+          $("sessionArea").classList.remove("hidden");
+          $("status").textContent =
+            "Session created. Wait for the physical board to be ready.";
+          $("startButton").classList.remove("hidden");
+          $("startButton").disabled = false;
+          $("countdown").classList.add("hidden");
+          $("finalResults").classList.add("hidden");
+        } catch (err) {
+          alert(err.message);
+        } finally {
+          $("createButton").disabled = false;
+        }
+      };
+      $("copyButton").onclick = async () => {
+        try {
+          await navigator.clipboard.writeText($("displayId").textContent);
+          $("status").textContent = "Session ID copied.";
+        } catch {
+          $("status").textContent =
+            "Select and copy the session ID shown above.";
+        }
+      };
+      $("startButton").onclick = async () => {
+        $("startButton").disabled = true;
+        try {
+          const d = await api(`/api/sessions/${sid}/start`, {
+            method: "POST",
+            body: "{}",
+          });
+          const target = Date.parse(d.start_at);
+          $("countdown").classList.remove("hidden");
+          $("status").textContent =
+            "Countdown scheduled. Waiting for the physical board…";
+          timer = setInterval(() => {
+            const n = Math.max(0, Math.ceil((target - Date.now()) / 1000));
+            $("countdown").textContent = n ? n : "GO!";
+            if (!n) {
+              clearInterval(timer);
+              timer = null;
+              $("status").textContent =
+                "Waiting for the ESP32 to confirm the game started…";
+            }
+          }, 100);
+          poll = setInterval(pollSession, 1000);
+        } catch (err) {
+          $("status").textContent = err.message;
+          $("startButton").disabled = false;
+        }
+      };
+      async function pollSession() {
+        if (!sid) return;
+        try {
+          const s = await api(`/api/sessions/${sid}`);
+          if (s.status === "playing") {
+            $("status").textContent =
+              "The physical game has started. Good luck!";
+            $("startButton").classList.add("hidden");
+            $("countdown").classList.add("hidden");
+          }
+          if (s.status === "completed" && s.result) {
+            stopTimers();
+            showFinal(s);
+          }
+        } catch (err) {
+          $("status").textContent = "Status check failed: " + err.message;
+        }
+      }
+      function showFinal(s) {
+        const r = s.result;
+        $("startButton").classList.add("hidden");
+        $("countdown").classList.add("hidden");
+        $("status").textContent =
+          "Game complete! Your results have been saved.";
+        $("finalResults").classList.remove("hidden");
+        $("finalResults").innerHTML =
+          `<h2>Game Results</h2><div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><button class="secondary full" id="resultAnalysis">View Performance Analysis</button>`;
+        $("resultAnalysis").onclick = () => {
+          tab("search");
+          showPerformance(s);
+        };
+      }
+      $("searchForm").onsubmit = async (e) => {
+        e.preventDefault();
+        $("searchButton").disabled = true;
+        $("searchMessage").textContent = "Searching…";
+        $("sessionList").innerHTML = "";
+        $("performanceView").classList.add("hidden");
+        try {
+          const d = await api(
+            `/api/players/search?codename=${encodeURIComponent($("searchCodename").value.trim())}`,
+          );
+          $("searchMessage").textContent = d.count
+            ? `Found ${d.count} session(s) for ${d.codename}.`
+            : `No sessions found for "${d.codename}".`;
+          for (const s of d.sessions) {
+            const card = document.createElement("article");
+            card.className = "card";
+            card.innerHTML = `<div class="sessionid">${esc(s.display_id)}</div><p class="muted small">${esc(new Date(s.created_at).toLocaleString())} · <span class="pill">${esc(s.status)}</span></p><div class="grid"><div class="stat"><span class="label">Points</span><strong>${s.score == null ? "—" : Number(s.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${s.highest_level ?? "—"}</strong></div></div><button class="primary full">View Session</button>`;
+            card.querySelector("button").onclick = () =>
+              loadPerformance(s.session_id);
+            $("sessionList").appendChild(card);
+          }
+        } catch (err) {
+          $("searchMessage").textContent = err.message;
+        } finally {
+          $("searchButton").disabled = false;
+        }
+      };
+      async function loadPerformance(id) {
+        $("performanceView").classList.remove("hidden");
+        $("performanceView").innerHTML = "<p>Loading performance…</p>";
+        try {
+          showPerformance(await api(`/api/sessions/${id}`));
+        } catch (err) {
+          $("performanceView").textContent = err.message;
+        }
+      }
+      function showPerformance(s) {
+        const el = $("performanceView");
+        el.classList.remove("hidden");
+        const r = s.result;
+        if (!r) {
+          el.innerHTML = `<div class="card"><h2>${esc(s.display_id)}</h2><p>This session is ${esc(s.status)}. Results will appear after the game is completed.</p></div>`;
+          return;
+        }
+        const a = r.analysis || {},
+          recs = Array.isArray(a.recommendations) ? a.recommendations : [];
+        el.innerHTML = `<div class="card"><div class="sessionid">${esc(s.display_id)}</div><p class="muted">Player: ${esc(s.codename)}</p><div class="grid"><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Points</span><strong>${Number(r.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${r.highest_level}</strong></div><div class="stat"><span class="label">Accuracy</span><strong>${Number(r.accuracy).toFixed(1)}%</strong></div><div class="stat"><span class="label">Mistakes</span><strong>${r.mistakes}</strong></div><div class="stat"><span class="label">Avg. Response</span><strong>${r.avg_response_time_ms == null ? "—" : Number(r.avg_response_time_ms).toFixed(0) + " ms"}</strong></div></div><h2>Performance Analysis</h2><p>Classification: <strong>${esc(a.classification || "Not available")}</strong></p><p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p><h2>Recommendations</h2>${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}<p class="small muted">IS thresholds are provisional and need team approval.</p></div>`;
+      }
+    </script>
+  </body>
+</html>
