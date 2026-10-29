@@ -184,7 +184,9 @@
             pattern="[A-Za-z0-9 _-]+"
             placeholder="e.g. StarPlayer"
             required
-          /><button class="primary full" id="createButton">
+          />
+          <p id="codenameWarning" class="message small hidden" role="status"></p>
+          <button class="primary full" id="createButton">
             Create Session
           </button>
         </form>
@@ -195,8 +197,10 @@
             <div class="label">Codename</div>
             <strong id="playerName"></strong>
           </div>
-          <button class="secondary full" id="copyButton">Copy Session ID</button
-          ><button class="primary full" id="startButton">START GAME</button>
+          <button class="secondary full" id="copyButton">Copy Session ID</button>
+          <p id="queueInfo" class="message small"></p>
+          <button class="primary full" id="startButton">START GAME</button>
+          <button class="secondary full hidden" id="abandonButton">Abandon Session</button>
           <div class="countdown hidden" id="countdown">5</div>
           <p id="status" class="message" role="status" aria-live="polite"></p>
           <div id="finalResults" class="hidden"></div>
@@ -229,9 +233,14 @@
     </main>
     <script>
       const $ = (id) => document.getElementById(id);
-      let sid = null,
-        poll = null,
-        timer = null;
+      const STORAGE_KEY = "lmc_active_session_id";
+      let sid = null;
+      let poll = null;
+      let timer = null;
+      let countdownTarget = null;
+      let duplicateCount = 0;
+      let duplicateCheckedFor = "";
+
       async function api(path, opts = {}) {
         const r = await fetch(path, {
           ...opts,
@@ -245,22 +254,15 @@
         return b;
       }
       function esc(s) {
-        return String(s ?? "").replace(
-          /[&<>"']/g,
-          (c) =>
-            ({
-              "&": "&amp;",
-              "<": "&lt;",
-              ">": "&gt;",
-              '"': "&quot;",
-              "'": "&#39;",
-            })[c],
-        );
+        return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+        })[c]);
       }
       function stopTimers() {
         if (poll) clearInterval(poll);
         if (timer) clearInterval(timer);
         poll = timer = null;
+        countdownTarget = null;
       }
       function tab(which) {
         const start = which === "start";
@@ -271,90 +273,209 @@
       }
       $("tabStart").onclick = () => tab("start");
       $("tabSearch").onclick = () => tab("search");
+
+      async function checkExistingCodename() {
+        const name = $("codename").value.trim();
+        if (name.length < 2) {
+          duplicateCount = 0;
+          duplicateCheckedFor = name;
+          $("codenameWarning").classList.add("hidden");
+          return 0;
+        }
+        try {
+          const d = await api(`/api/players/search?codename=${encodeURIComponent(name)}`);
+          duplicateCount = d.count || 0;
+          duplicateCheckedFor = name;
+          const warning = $("codenameWarning");
+          if (duplicateCount > 0) {
+            warning.textContent = `Heads up: "${name}" has ${duplicateCount} previous session(s). Codenames are not unique, so these may belong to another player.`;
+            warning.classList.remove("hidden");
+          } else {
+            warning.classList.add("hidden");
+          }
+          return duplicateCount;
+        } catch {
+          // A failed warning lookup must not prevent a player from creating a session.
+          return 0;
+        }
+      }
+      $("codename").addEventListener("blur", checkExistingCodename);
+
       $("createForm").onsubmit = async (e) => {
         e.preventDefault();
+        const name = $("codename").value.trim();
         $("createButton").disabled = true;
         try {
+          let found = duplicateCheckedFor === name ? duplicateCount : await checkExistingCodename();
+          if (found > 0 && !window.confirm(
+            `The codename "${name}" has ${found} previous session(s). They may belong to another player. Do you still want to use this codename?`
+          )) return;
           const d = await api("/api/sessions", {
             method: "POST",
-            body: JSON.stringify({ codename: $("codename").value.trim() }),
+            body: JSON.stringify({ codename: name }),
           });
           sid = d.session_id;
-          $("displayId").textContent = d.display_id;
-          $("playerName").textContent = d.codename;
-          $("sessionArea").classList.remove("hidden");
-          $("status").textContent =
-            "Session created. Wait for the physical board to be ready.";
-          $("startButton").classList.remove("hidden");
-          $("startButton").disabled = false;
-          $("countdown").classList.add("hidden");
-          $("finalResults").classList.add("hidden");
+          localStorage.setItem(STORAGE_KEY, sid);
+          stopTimers();
+          renderSession(d);
+          $("status").textContent = "Session created. Check your queue position and wait for your turn.";
+          startPolling();
         } catch (err) {
           alert(err.message);
         } finally {
           $("createButton").disabled = false;
         }
       };
+
       $("copyButton").onclick = async () => {
         try {
           await navigator.clipboard.writeText($("displayId").textContent);
           $("status").textContent = "Session ID copied.";
         } catch {
-          $("status").textContent =
-            "Select and copy the session ID shown above.";
+          $("status").textContent = "Select and copy the session ID shown above.";
         }
       };
+
+      function beginCountdown(remainingMs) {
+        if (timer) clearInterval(timer);
+        const duration = Math.max(0, Number(remainingMs) || 0);
+        // performance.now() is monotonic and unaffected by phone clock/time-zone settings.
+        countdownTarget = performance.now() + duration;
+        $("countdown").classList.remove("hidden");
+        const tick = () => {
+          const remaining = Math.max(0, countdownTarget - performance.now());
+          const seconds = Math.ceil(remaining / 1000);
+          $("countdown").textContent = seconds > 0 ? String(seconds) : "GO!";
+          if (remaining <= 0) {
+            clearInterval(timer);
+            timer = null;
+            $("status").textContent = "Waiting for the ESP32 to confirm the game started…";
+          }
+        };
+        tick();
+        timer = setInterval(tick, 100);
+      }
+
       $("startButton").onclick = async () => {
+        if (!sid) return;
         $("startButton").disabled = true;
         try {
           const d = await api(`/api/sessions/${sid}/start`, {
             method: "POST",
             body: "{}",
           });
-          const target = Date.parse(d.start_at);
-          $("countdown").classList.remove("hidden");
-          $("status").textContent =
-            "Countdown scheduled. Waiting for the physical board…";
-          timer = setInterval(() => {
-            const n = Math.max(0, Math.ceil((target - Date.now()) / 1000));
-            $("countdown").textContent = n ? n : "GO!";
-            if (!n) {
-              clearInterval(timer);
-              timer = null;
-              $("status").textContent =
-                "Waiting for the ESP32 to confirm the game started…";
-            }
-          }, 100);
-          poll = setInterval(pollSession, 1000);
+          $("status").textContent = "Countdown scheduled. Waiting for the physical board…";
+          beginCountdown(d.countdown_remaining_ms ?? 5000);
+          await pollSession();
         } catch (err) {
           $("status").textContent = err.message;
           $("startButton").disabled = false;
+          await pollSession();
         }
       };
+
+      $("abandonButton").onclick = async () => {
+        if (!sid || !window.confirm("Abandon this session? This cannot be undone.")) return;
+        $("abandonButton").disabled = true;
+        try {
+          const d = await api(`/api/sessions/${sid}/abandon`, {
+            method: "POST",
+            body: "{}",
+          });
+          stopTimers();
+          renderSession(d);
+          $("status").textContent = "Session abandoned. You can create a new session if needed.";
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (err) {
+          $("status").textContent = err.message;
+          $("abandonButton").disabled = false;
+        }
+      };
+
+      function renderSession(s) {
+        sid = s.session_id || sid;
+        if (!sid) return;
+        $("sessionArea").classList.remove("hidden");
+        $("displayId").textContent = s.display_id || "Session";
+        $("playerName").textContent = s.codename || "";
+        $("queueInfo").textContent = "";
+        if (s.status === "waiting") {
+          if (s.queue_position) {
+            $("queueInfo").textContent = `Queue position: ${s.queue_position} of ${s.waiting_count}. Maximum ${s.max_waiting || 3} waiting players.`;
+          } else {
+            $("queueInfo").textContent = `Waiting players: ${s.waiting_count ?? "—"} of ${s.max_waiting || 3}.`;
+          }
+          const canStart = Boolean(s.is_next);
+          $("startButton").classList.remove("hidden");
+          $("startButton").disabled = !canStart;
+          $("startButton").textContent = canStart ? "START GAME" : "WAIT FOR YOUR TURN";
+          $("abandonButton").classList.remove("hidden");
+          $("abandonButton").disabled = false;
+          $("countdown").classList.add("hidden");
+          if (!canStart && s.active_session) {
+            $("status").textContent = `Another game is active (${s.active_session.display_id}). You are in the queue.`;
+          } else if (!canStart) {
+            $("status").textContent = "Please wait for the player ahead of you.";
+          }
+        } else if (s.status === "countdown") {
+          $("startButton").classList.add("hidden");
+          $("abandonButton").classList.remove("hidden");
+          $("abandonButton").disabled = false;
+          $("queueInfo").textContent = "Your game is scheduled to start.";
+          if (s.countdown_remaining_ms != null && countdownTarget == null) {
+            beginCountdown(s.countdown_remaining_ms);
+          }
+        } else if (s.status === "playing") {
+          if (timer) { clearInterval(timer); timer = null; }
+          $("startButton").classList.add("hidden");
+          $("abandonButton").classList.remove("hidden");
+          $("abandonButton").disabled = false;
+          $("countdown").classList.add("hidden");
+          $("queueInfo").textContent = "The physical device is currently running your game.";
+          $("status").textContent = "The physical game has started. Good luck!";
+        } else if (s.status === "completed" && s.result) {
+          stopTimers();
+          $("abandonButton").classList.add("hidden");
+          showFinal(s);
+        } else if (s.status === "abandoned") {
+          stopTimers();
+          $("startButton").classList.add("hidden");
+          $("abandonButton").classList.add("hidden");
+          $("countdown").classList.add("hidden");
+          $("queueInfo").textContent = "";
+          $("status").textContent = "This session was abandoned.";
+        }
+      }
+
       async function pollSession() {
         if (!sid) return;
         try {
           const s = await api(`/api/sessions/${sid}`);
-          if (s.status === "playing") {
-            $("status").textContent =
-              "The physical game has started. Good luck!";
-            $("startButton").classList.add("hidden");
-            $("countdown").classList.add("hidden");
-          }
+          renderSession(s);
           if (s.status === "completed" && s.result) {
             stopTimers();
-            showFinal(s);
+            localStorage.removeItem(STORAGE_KEY);
+          }
+          if (s.status === "abandoned") {
+            stopTimers();
+            localStorage.removeItem(STORAGE_KEY);
           }
         } catch (err) {
           $("status").textContent = "Status check failed: " + err.message;
         }
       }
+      function startPolling() {
+        if (poll) clearInterval(poll);
+        pollSession();
+        poll = setInterval(pollSession, 1500);
+      }
+
       function showFinal(s) {
         const r = s.result;
         $("startButton").classList.add("hidden");
+        $("abandonButton").classList.add("hidden");
         $("countdown").classList.add("hidden");
-        $("status").textContent =
-          "Game complete! Your results have been saved.";
+        $("status").textContent = "Game complete! Your results have been saved.";
         $("finalResults").classList.remove("hidden");
         $("finalResults").innerHTML =
           `<h2>Game Results</h2><div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><button class="secondary full" id="resultAnalysis">View Performance Analysis</button>`;
@@ -363,6 +484,7 @@
           showPerformance(s);
         };
       }
+
       $("searchForm").onsubmit = async (e) => {
         e.preventDefault();
         $("searchButton").disabled = true;
@@ -380,8 +502,7 @@
             const card = document.createElement("article");
             card.className = "card";
             card.innerHTML = `<div class="sessionid">${esc(s.display_id)}</div><p class="muted small">${esc(new Date(s.created_at).toLocaleString())} · <span class="pill">${esc(s.status)}</span></p><div class="grid"><div class="stat"><span class="label">Points</span><strong>${s.score == null ? "—" : Number(s.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${s.highest_level ?? "—"}</strong></div></div><button class="primary full">View Session</button>`;
-            card.querySelector("button").onclick = () =>
-              loadPerformance(s.session_id);
+            card.querySelector("button").onclick = () => loadPerformance(s.session_id);
             $("sessionList").appendChild(card);
           }
         } catch (err) {
@@ -411,6 +532,24 @@
           recs = Array.isArray(a.recommendations) ? a.recommendations : [];
         el.innerHTML = `<div class="card"><div class="sessionid">${esc(s.display_id)}</div><p class="muted">Player: ${esc(s.codename)}</p><div class="grid"><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Points</span><strong>${Number(r.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${r.highest_level}</strong></div><div class="stat"><span class="label">Accuracy</span><strong>${Number(r.accuracy).toFixed(1)}%</strong></div><div class="stat"><span class="label">Mistakes</span><strong>${r.mistakes}</strong></div><div class="stat"><span class="label">Avg. Response</span><strong>${r.avg_response_time_ms == null ? "—" : Number(r.avg_response_time_ms).toFixed(0) + " ms"}</strong></div></div><h2>Performance Analysis</h2><p>Classification: <strong>${esc(a.classification || "Not available")}</strong></p><p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p><h2>Recommendations</h2>${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}<p class="small muted">IS thresholds are provisional and need team approval.</p></div>`;
       }
+
+      async function restoreSavedSession() {
+        try {
+          const saved = localStorage.getItem(STORAGE_KEY);
+          if (!saved) return;
+          sid = saved;
+          const s = await api(`/api/sessions/${sid}`);
+          renderSession(s);
+          if (s.status === "completed" || s.status === "abandoned") {
+            localStorage.removeItem(STORAGE_KEY);
+            return;
+          }
+          startPolling();
+        } catch {
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      }
+      restoreSavedSession();
     </script>
   </body>
 </html>
