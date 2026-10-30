@@ -71,3 +71,6 @@ node_modules/
 
 # --- Generated test / debug output ---
 test-results/
+
+# Local ESP32 secrets
+firmware/src/arduino_secrets.h

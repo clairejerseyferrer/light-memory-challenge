@@ -1,0 +1,15 @@
+LMC scoring update — 2026-10-28
+
+Requested rule: 100 points, minus 10 points for every whole second under 10 seconds.
+
+Implemented formula for a successful round:
+  secs = floor(response_time_ms / 1000)
+  if secs >= 10: points = 100
+  otherwise: points = max(0, 100 - 10 * (10 - secs))
+  if response time exceeds the level deadline plus grace period: points = 0 and a life is lost.
+
+Examples: 1s=10, 2s=20, ... 9s=90, 10s or more=100 (if within deadline).
+
+Changed: firmware scoring threshold and comments; Excel formula workbook labels/parameter; documentation.
+Unchanged: game flow, backend endpoints, dashboard, reconnection/failure handling, offline queue, retry handling, and payload structure.
+Hardware and live-backend tests have not been performed by this script.
