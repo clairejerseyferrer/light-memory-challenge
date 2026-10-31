@@ -57,6 +57,29 @@ class IntelligentSystemTests(unittest.TestCase):
         self.assertEqual(result["data_status"], "insufficient_per_level_data")
         self.assertEqual(result["proposed_level_adjustment"], 0)
 
+    def test_per_level_summaries_and_incorrect_press_positions(self):
+        row = level(4, 80, 1.2, .20, attempts=5)
+        row["incorrect_press_count"] = 5
+        row["incorrect_press_details"] = [
+            [1, 3, 2, 4, 5],
+            [2, 4, 3, 1, 5],
+            [3, 5, 1, 2, 5],
+            [4, 4, 2, 3, 5],
+            [5, 5, 4, 1, 5],
+        ]
+        result = analyze_performance(
+            row["accuracy"], row["mistakes"], row["avg_response_time_ms"], [row]
+        )
+        self.assertEqual(result["metrics"]["sequences_attempted"], 5)
+        self.assertEqual(result["metrics"]["mistakes"], row["mistakes"])
+        self.assertEqual(result["per_level_analysis"][0]["level"], 4)
+        self.assertEqual(len(result["metrics"]["incorrect_press_details"]), 5)
+        self.assertEqual(result["metrics"]["incorrect_press_count"], 5)
+        self.assertIn(
+            "Try grouping the sequence into small chunks of 2 to 3 buttons.",
+            result["recommendations"],
+        )
+
     def test_level_floor_and_game_cap(self):
         low = level(1, 40, 2.9, .9)
         result_low = analyze_performance(40, low["mistakes"], low["avg_response_time_ms"], [low])

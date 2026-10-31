@@ -19,7 +19,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 DEVICE_API_TOKEN = os.getenv("DEVICE_API_TOKEN", "").strip()
 DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "ESP32-001").strip()
 supabase: Client | None = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY else None
-app = FastAPI(title="Light Memory Challenge API", version="0.3.0")
+app = FastAPI(title="Light Memory Challenge API", version="0.4.0")
 
 
 def db() -> Client:
@@ -28,7 +28,9 @@ def db() -> Client:
     return supabase
 
 def require_device_token(token: str | None):
-    if DEVICE_API_TOKEN and token != DEVICE_API_TOKEN:
+    if not DEVICE_API_TOKEN:
+        raise HTTPException(503, "DEVICE_API_TOKEN is not configured on the server.")
+    if token != DEVICE_API_TOKEN:
         raise HTTPException(401, "Invalid or missing device token.")
 
 def dt_utc(value):
@@ -99,6 +101,11 @@ class CreateSession(BaseModel):
             raise ValueError("Use letters, numbers, spaces, hyphens, or underscores only.")
         return value
 
+class DeviceAbandon(BaseModel):
+    device_id: str = Field(min_length=1, max_length=64)
+    session_id: UUID
+
+
 class GameResult(BaseModel):
     score: int = Field(ge=0)
     highest_level: int = Field(ge=1)
@@ -112,6 +119,40 @@ class GameResult(BaseModel):
     fastest_response_time_ms: float | None = Field(default=None, ge=0)
     slowest_response_time_ms: float | None = Field(default=None, ge=0)
     round_data: list[dict[str, Any]] = Field(default_factory=list)
+    @field_validator("round_data", mode="before")
+    @classmethod
+    def normalize_round_data(cls, value):
+        if not isinstance(value, list):
+            raise ValueError("round_data must be a list.")
+        aliases = {
+            "l": "level",
+            "a": "sequences_attempted",
+            "c": "correct_sequences",
+            "m": "mistakes",
+            "ip": "incorrect_press_count",
+            "acc": "accuracy",
+            "avg": "avg_response_time_ms",
+            "fast": "fastest_response_time_ms",
+            "slow": "slowest_response_time_ms",
+            "n": "sequence_length",
+            "d": "incorrect_press_details",
+        }
+        normalized = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("Each round_data entry must be an object.")
+            row = dict(item)
+            for short, full in aliases.items():
+                if full not in row and short in row:
+                    row[full] = row.pop(short)
+            # Counts are the source of truth for per-level accuracy.
+            attempted = row.get("sequences_attempted")
+            correct = row.get("correct_sequences")
+            if isinstance(attempted, (int, float)) and attempted > 0 and isinstance(correct, (int, float)):
+                row["accuracy"] = round(100.0 * correct / attempted, 2)
+            normalized.append(row)
+        return normalized
+
     @field_validator("correct_rounds")
     @classmethod
     def validate_correct_rounds(cls, value, info):
@@ -124,7 +165,7 @@ def home(): return FileResponse(WEB / "index.html", headers={"Cache-Control": "n
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "supabase_configured": supabase is not None, "device_id": DEFAULT_DEVICE_ID, "api_version": "0.3.0"}
+    return {"status": "ok", "supabase_configured": supabase is not None, "device_id": DEFAULT_DEVICE_ID, "api_version": "0.4.0"}
 
 @app.post("/api/sessions", status_code=201)
 def create_session(payload: CreateSession):
@@ -203,31 +244,44 @@ def abandon_session(session_id: UUID):
 
 
 @app.post("/api/device/abandon")
-def device_abandon(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_token: str | None = Header(default=None)):
-    """Allow the authenticated physical device to abandon its current active game."""
+def device_abandon(payload: DeviceAbandon, x_device_token: str | None = Header(default=None)):
+    """Abandon only the exact active session requested by the authenticated ESP32."""
     require_device_token(x_device_token)
     client = db()
+    sid = str(payload.session_id)
     q = (
         client.table("game_sessions")
-        .select("id,status")
-        .eq("device_id", device_id)
-        .in_("status", ["countdown", "playing"])
-        .order("created_at", desc=True)
+        .select("id,status,device_id")
+        .eq("id", sid)
         .limit(1)
         .execute()
     )
     if not q.data:
-        return {"status": "no_active_session"}
-    sid = q.data[0]["id"]
+        raise HTTPException(404, "Session not found.")
+    session = q.data[0]
+    if session["device_id"] != payload.device_id:
+        raise HTTPException(403, "Session does not belong to this device.")
+    if session["status"] == "abandoned":
+        return {"session_id": sid, "status": "abandoned", "idempotent": True}
+    if session["status"] == "completed":
+        return {"session_id": sid, "status": "completed", "ignored": True}
+    if session["status"] not in ("countdown", "playing"):
+        raise HTTPException(409, f"Session cannot be abandoned from status '{session['status']}'.")
     updated = (
         client.table("game_sessions")
         .update({"status": "abandoned"})
         .eq("id", sid)
+        .eq("device_id", payload.device_id)
         .in_("status", ["countdown", "playing"])
         .execute()
     )
     if not updated.data:
-        raise HTTPException(409, "Active session changed before it could be abandoned.")
+        latest = client.table("game_sessions").select("status").eq("id", sid).limit(1).execute()
+        if latest.data and latest.data[0]["status"] == "abandoned":
+            return {"session_id": sid, "status": "abandoned", "idempotent": True}
+        if latest.data and latest.data[0]["status"] == "completed":
+            return {"session_id": sid, "status": "completed", "ignored": True}
+        raise HTTPException(409, "Session changed before it could be abandoned.")
     return {"session_id": sid, "status": "abandoned"}
 
 
@@ -334,6 +388,8 @@ def save_results(session_id: UUID, payload: GameResult):
         raise HTTPException(404, "Session not found.")
 
     session = q.data[0]
+    if session["status"] == "abandoned":
+        raise HTTPException(409, "This session was abandoned. Results will not be accepted.")
 
     # 2. Check whether a result was already saved.
     # This MUST happen before rejecting a non-playing session.
@@ -354,16 +410,28 @@ def save_results(session_id: UUID, payload: GameResult):
         # but the session update did not finish.
         if session["status"] != "completed":
             update_data = {"status": "completed"}
-
-            # Preserve an existing completion timestamp.
             if not session.get("completed_at"):
-                update_data["completed_at"] = (
-                    datetime.now(timezone.utc).isoformat()
+                update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+            repaired = (
+                client.table("game_sessions")
+                .update(update_data)
+                .eq("id", sid)
+                .eq("status", "playing")
+                .execute()
+            )
+            if not repaired.data:
+                latest = (
+                    client.table("game_sessions")
+                    .select("status")
+                    .eq("id", sid)
+                    .limit(1)
+                    .execute()
                 )
-
-            client.table("game_sessions").update(
-                update_data
-            ).eq("id", sid).execute()
+                if latest.data and latest.data[0]["status"] == "abandoned":
+                    client.table("game_results").delete().eq("session_id", sid).execute()
+                    raise HTTPException(409, "This session was abandoned. Results will not be accepted.")
+                if not latest.data or latest.data[0]["status"] != "completed":
+                    raise HTTPException(409, "Session status changed before the result could be confirmed.")
 
         result = get_result(client, sid)
 
@@ -421,13 +489,21 @@ def save_results(session_id: UUID, payload: GameResult):
         )
 
         if not updated.data:
-            raise RuntimeError("Could not mark session completed")
+            client.table("game_results").delete().eq("session_id", sid).execute()
+            raise RuntimeError("Session changed before completion; inserted result was rolled back.")
 
     except Exception:
-        # A concurrent retry may have inserted the same result
-        # after our initial existence check. Recheck before
-        # reporting a failure.
+        # Re-read the session after a failed insert/status update. If physical
+        # abandonment won the race, remove any result row and never rank it.
         try:
+            latest_session_q = (
+                client.table("game_sessions")
+                .select("status,completed_at,session_number,codename")
+                .eq("id", sid)
+                .limit(1)
+                .execute()
+            )
+            latest_session = latest_session_q.data[0] if latest_session_q.data else None
             retry_q = (
                 client.table("game_results")
                 .select("*")
@@ -435,32 +511,52 @@ def save_results(session_id: UUID, payload: GameResult):
                 .limit(1)
                 .execute()
             )
+            if latest_session and latest_session["status"] == "abandoned":
+                if retry_q.data:
+                    client.table("game_results").delete().eq("session_id", sid).execute()
+                raise HTTPException(409, "This session was abandoned. Results will not be accepted.")
 
-            if retry_q.data:
+            if retry_q.data and latest_session:
                 existing = retry_q.data[0]
-
-                client.table("game_sessions").update({
-                    "status": "completed",
-                    "completed_at": (
-                        session.get("completed_at")
-                        or datetime.now(timezone.utc).isoformat()
-                    ),
-                }).eq("id", sid).execute()
-
+                if latest_session["status"] == "playing":
+                    repaired = (
+                        client.table("game_sessions")
+                        .update({
+                            "status": "completed",
+                            "completed_at": (
+                                latest_session.get("completed_at")
+                                or datetime.now(timezone.utc).isoformat()
+                            ),
+                        })
+                        .eq("id", sid)
+                        .eq("status", "playing")
+                        .execute()
+                    )
+                    if not repaired.data:
+                        refreshed = (
+                            client.table("game_sessions")
+                            .select("status")
+                            .eq("id", sid)
+                            .limit(1)
+                            .execute()
+                        )
+                        if refreshed.data and refreshed.data[0]["status"] == "abandoned":
+                            client.table("game_results").delete().eq("session_id", sid).execute()
+                            raise HTTPException(409, "This session was abandoned. Results will not be accepted.")
                 result = get_result(client, sid)
-
                 return {
                     "message": "Game results already saved.",
                     "session_id": sid,
-                    "display_id": readable_id(session["session_number"]),
-                    "codename": session["codename"],
+                    "display_id": readable_id(latest_session["session_number"]),
+                    "codename": latest_session["codename"],
                     "score": existing["score"],
                     "ranking": result.get("ranking") if result else None,
                     "status": "completed",
                     "analysis": existing.get("analysis"),
                     "result": result if result else existing,
                 }
-
+        except HTTPException:
+            raise
         except Exception:
             pass
 

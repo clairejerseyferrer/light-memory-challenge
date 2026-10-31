@@ -3,8 +3,8 @@
   LIGHT MEMORY CHALLENGE  -  ESP32 firmware v3 (LMC Player Portal API)
   ================================================================
   How a game works with the web app / backend:
-    1. Player opens the web app on a phone, types a codename, taps
-       "Create Session", then "START GAME".
+    1. Player opens the web app on a phone, creates a session, then
+       taps START GAME. The physical button is ABANDON/RESET only.
     2. The backend schedules the start 5 seconds ahead.
     3. THIS ESP32 polls  GET /api/device/command  once per second.
        When it receives START it shows the countdown, then confirms
@@ -32,7 +32,7 @@
   Hardware:
     - 7 LEDs         -> GPIO 4, 5, 13, 14, 16, 17, 18
     - 7 Game Buttons -> GPIO 19, 23, 25, 26, 27, 32, 33
-    - Start Button   -> GPIO 15 (wired but not used: the web app starts the game)
+    - Abandon Button -> GPIO 15 (hold for 2 seconds during a session)
     - Buzzer         -> GPIO 2
     - OLED (I2C)     -> SDA 21, SCL 22
 
@@ -97,7 +97,8 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 // ---------------- PINS ----------------
 const int LED_PINS[7]    = {4, 5, 13, 14, 16, 17, 18};
 const int BUTTON_PINS[7] = {19, 23, 25, 26, 27, 32, 33};
-const int START_BUTTON   = 15;
+const int ABANDON_BUTTON = 15;
+const unsigned long ABANDON_HOLD_MS = 2000;
 const int BUZZER_PIN     = 2;
 
 // ---------------- CURRENT SESSION (from the backend) ----------------
@@ -127,23 +128,37 @@ unsigned long gameStartMs = 0;
 int pressCount = 0;
 unsigned long pressSumMs = 0, pressMinMs = 0, pressMaxMs = 0;
 
-// per-round log (the last 16 rounds are sent as round_data; 16 always fits the buffer)
-const int MAX_LOGGED_ROUNDS = 16;
+const int MAX_SEQUENCE = 30;
+const int MAX_LOGGED_ROUNDS = 64; // theoretical game maximum is below this
 struct RoundLog {
-  uint8_t  round, level, seqLen;
-  bool     correct, timedOut;
+  uint8_t round, level, seqLen;
+  bool correct, timedOut;
   uint32_t responseMs;
-  uint8_t  wrongMask;               // bit i set = button i+1 was expected but pressed wrong
+  uint32_t incorrectPositionMask; // bit i = incorrect press at sequence position i+1
+  uint8_t pressedAt[MAX_SEQUENCE];
+  uint8_t expectedAt[MAX_SEQUENCE];
+};
+struct LevelStats {
+  uint16_t attempted, correct, mistakes, incorrectPresses;
+  uint32_t responseTotalMs;
+  uint16_t responseSamples;
+  uint32_t fastestResponseMs, slowestResponseMs;
+  uint8_t sequenceLength;
 };
 RoundLog roundLog[MAX_LOGGED_ROUNDS];
 int roundLogCount = 0;
+LevelStats levelStats[MAX_LEVEL + 1];
+bool sessionAbandoned = false;
+bool abandonPressTiming = false;
+unsigned long abandonPressStartedAt = 0;
+bool abandonHoldReported = false;
+char pendingAbandonId[40] = "";
 
-const int MAX_SEQUENCE = 30;
 int sequence[MAX_SEQUENCE];
 int playerInput[MAX_SEQUENCE];
 
 // ---------------- UPLOAD / QUEUE SETTINGS ----------------
-const int  PAYLOAD_MAX = 3072;
+const int  PAYLOAD_MAX = 4096;
 const int  ENTRY_MAX = PAYLOAD_MAX + 48;           // "uuid|json"
 const int  QUEUE_SIZE = 8;                         // unsent games kept in flash
 const unsigned long POLL_INTERVAL_MS  = 1000;      // ask the server for a start command
@@ -166,13 +181,20 @@ unsigned long baseTimeForLevel(int lvl);
 int calcPoints(int lvl, unsigned long respMs);
 void resetGame();
 void playSession();
-void runCountdown();
+bool runCountdown();
 void generateRandomSequence();
-void displaySequenceUsingLEDs();
-void getPlayerInput();
+bool displaySequenceUsingLEDs();
+bool getPlayerInput();
 int waitForButtonPress(unsigned long roundStart, unsigned long limitMs, bool &timedOut, unsigned long &detectedAt);
+bool checkPhysicalAbandon();
+bool delayWithAbandon(unsigned long durationMs);
+bool sendDeviceAbandon();
+void clearCurrentSession();
+void clearPendingAbandon();
 void checkInput();
-void addRoundLog(bool correct, bool timedOut, uint8_t wrongMask);
+void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
+                 const uint8_t* pressedAt, const uint8_t* expectedAt);
+
 void updateOnCorrect();
 void updateOnMistake(bool wasTimeout);
 void endGame();
@@ -212,7 +234,7 @@ void setup() {
     digitalWrite(LED_PINS[i], LOW);
     pinMode(BUTTON_PINS[i], INPUT_PULLUP);
   }
-  pinMode(START_BUTTON, INPUT_PULLUP);
+  pinMode(ABANDON_BUTTON, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
@@ -230,6 +252,11 @@ void setup() {
     syncTime(8000);            // needed to line up with the server's start time
     flushQueue(1);             // send games left in flash from before a reboot
   }
+  prefs.begin("lmcq", false);
+  String pending = prefs.getString("abandon", "");
+  if (pending.length() > 0 && pending.length() < sizeof(pendingAbandonId))
+    strncpy(pendingAbandonId, pending.c_str(), sizeof(pendingAbandonId) - 1);
+  prefs.end();
   idleShown = IDLE_NONE;
 }
 
@@ -258,11 +285,15 @@ void loop() {
     flushQueue(1);
     lastFlush = millis();
   }
-  if (now - lastPoll >= POLL_INTERVAL_MS) {
+  // Retry an offline abandon before accepting another start command.
+  if (pendingAbandonId[0] && now - lastPoll >= POLL_INTERVAL_MS) {
+    lastPoll = now;
+    if (sendDeviceAbandon()) clearPendingAbandon();
+  } else if (now - lastPoll >= POLL_INTERVAL_MS) {
     lastPoll = now;
     if (pollForStart()) {
       playSession();
-      idleShown = IDLE_NONE;     // force the idle screen to redraw
+      idleShown = IDLE_NONE;
     }
   }
   delay(20);
@@ -272,9 +303,15 @@ void loop() {
 // ONE FULL GAME SESSION
 // =================================================================
 void playSession() {
+  sessionAbandoned = false;
+  abandonPressTiming = false;
+  abandonHoldReported = false;
   Serial.printf("START received: %s (%s) codename=%s\n", currentDisplayId, currentSessionId, currentCodename);
 
-  runCountdown();
+  if (!runCountdown() || sessionAbandoned) {
+    clearCurrentSession();
+    return;
+  }
 
   // Tell the server the game really started. 'not arrived' replies mean
   // our clock is a little early, so we wait and try again.
@@ -284,6 +321,7 @@ void playSession() {
     playTone(300, 400);
     strncpy(ignoredSessionId, currentSessionId, sizeof(ignoredSessionId) - 1);
     delay(3000);
+    clearCurrentSession();
     return;
   }
   if (sr == START_UNREACHABLE) {
@@ -294,11 +332,17 @@ void playSession() {
   resetGame();
   gameStartMs = millis();
 
-  while (lives > 0 && !allLevelsCleared) {
+  while (lives > 0 && !allLevelsCleared && !sessionAbandoned) {
     generateRandomSequence();
-    displaySequenceUsingLEDs();
-    getPlayerInput();
+    if (!displaySequenceUsingLEDs()) break;
+    if (!getPlayerInput()) break;
     checkInput();
+  }
+  if (sessionAbandoned) {
+    showMessage("SESSION RESET", "Returning to queue...");
+    delay(1200);
+    clearCurrentSession();
+    return; // An abandoned game is NEVER uploaded as a completed result.
   }
   endGame();
 }
@@ -319,36 +363,112 @@ void resetGame() {
   pressMinMs = 0;
   pressMaxMs = 0;
   roundLogCount = 0;
+  memset(levelStats, 0, sizeof(levelStats));
   allLevelsCleared = false;
+}
+
+// Physical GPIO15 button is an abandon/reset control only. Hold for 2s.
+bool checkPhysicalAbandon() {
+  if (!currentSessionId[0] || sessionAbandoned || abandonHoldReported) return sessionAbandoned;
+  if (digitalRead(ABANDON_BUTTON) == LOW) {
+    if (!abandonPressTiming) {
+      delay(25); // debounce
+      if (digitalRead(ABANDON_BUTTON) == LOW) {
+        abandonPressTiming = true;
+        abandonPressStartedAt = millis();
+      }
+    } else if (millis() - abandonPressStartedAt >= ABANDON_HOLD_MS) {
+      abandonHoldReported = true;
+      sessionAbandoned = true;
+      strncpy(pendingAbandonId, currentSessionId, sizeof(pendingAbandonId) - 1);
+      prefs.begin("lmcq", false);
+      prefs.putString("abandon", pendingAbandonId);
+      prefs.end();
+      showMessage("ABANDONING", "Resetting session...");
+      Serial.printf("Physical abandon requested for %s\n", pendingAbandonId);
+      if (sendDeviceAbandon()) clearPendingAbandon();
+      return true;
+    }
+  } else {
+    abandonPressTiming = false;
+    abandonPressStartedAt = 0;
+  }
+  return false;
+}
+
+bool delayWithAbandon(unsigned long durationMs) {
+  unsigned long started = millis();
+  while (millis() - started < durationMs) {
+    if (checkPhysicalAbandon()) return false;
+    delay(10);
+  }
+  return !sessionAbandoned;
+}
+
+bool sendDeviceAbandon() {
+  if (!pendingAbandonId[0]) return true;
+  char body[128];
+  snprintf(body, sizeof(body),
+    "{\"device_id\":\"%s\",\"session_id\":\"%s\"}",
+    DEVICE_ID, pendingAbandonId);
+  String response;
+  int code = httpRequest("POST", "/api/device/abandon", body, &response);
+  Serial.printf("device abandon -> %d: %s\n", code, response.c_str());
+  if (isSuccess(code) || code == 404) return true; // 404 means the old session no longer exists.
+  if (code == 401 || code == 403) showIdle(IDLE_BAD_TOKEN);
+  else showIdle(IDLE_NO_SERVER);
+  return false;
+}
+
+void clearPendingAbandon() {
+  pendingAbandonId[0] = 0;
+  prefs.begin("lmcq", false);
+  prefs.remove("abandon");
+  prefs.end();
+}
+
+void clearCurrentSession() {
+  currentSessionId[0] = 0;
+  currentDisplayId[0] = 0;
+  currentCodename[0] = 0;
+  currentStartAtEpoch = 0;
+  sessionAbandoned = false;
+  abandonPressTiming = false;
+  abandonHoldReported = false;
+  showMessage("WAITING FOR", "Start a session on phone");
 }
 
 // =================================================================
 // COUNTDOWN (lines up with the server's start time using NTP time)
 // =================================================================
-void runCountdown() {
+bool runCountdown() {
   char name[22];
   strncpy(name, currentCodename, sizeof(name) - 1);
   name[sizeof(name) - 1] = 0;
   showMessage("HELLO!", name);
-  delay(1200);
+  if (!delayWithAbandon(1200)) return false;
 
   if (timeIsSynced()) {
     while (true) {
+      if (checkPhysicalAbandon()) return false;
       long rem = currentStartAtEpoch - (long)time(nullptr);
       if (rem <= 0 || rem > 15) break;
       showCountdown(rem);
       playTone(1000, 120);
-      delay(850);
+      if (!delayWithAbandon(850)) return false;
     }
   } else {
-    for (int s = 5; s > 0; s--) {            // clock not synced: plain 5 s countdown
+    for (int s = 5; s > 0; s--) {
+      if (checkPhysicalAbandon()) return false;
       showCountdown(s);
       playTone(1000, 120);
-      delay(850);
+      if (!delayWithAbandon(850)) return false;
     }
   }
+  if (checkPhysicalAbandon()) return false;
   playTone(1500, 300);
   showMessage("GO!", "");
+  return true;
 }
 
 // =================================================================
@@ -381,20 +501,26 @@ void generateRandomSequence() {
   }
 }
 
-void displaySequenceUsingLEDs() {
-  showMessage("WATCH", "THE LIGHTS");
-  delay(WATCH_PAUSE_MS);
+bool displaySequenceUsingLEDs() {
+  showMessage("WATCH", "Hold RESET 2s to abandon");
+  if (!delayWithAbandon(WATCH_PAUSE_MS)) return false;
   for (int i = 0; i < sequenceLength; i++) {
+    if (checkPhysicalAbandon()) return false;
     int ledIndex = sequence[i];
     digitalWrite(LED_PINS[ledIndex], HIGH);
     playTone(800, LED_BEEP_MS);
-    if (LED_ON_MS > (unsigned long)LED_BEEP_MS) delay(LED_ON_MS - LED_BEEP_MS);
+    if (LED_ON_MS > (unsigned long)LED_BEEP_MS &&
+        !delayWithAbandon(LED_ON_MS - LED_BEEP_MS)) {
+      digitalWrite(LED_PINS[ledIndex], LOW);
+      return false;
+    }
     digitalWrite(LED_PINS[ledIndex], LOW);
-    delay(LED_GAP_MS);
+    if (!delayWithAbandon(LED_GAP_MS)) return false;
   }
+  return true;
 }
 
-void getPlayerInput() {
+bool getPlayerInput() {
   lastTimerKey = 0;                    // forces the countdown screen to draw
 
   unsigned long limitMs = baseTimeForLevel(level) + GRACE_MS;
@@ -406,6 +532,7 @@ void getPlayerInput() {
   for (int i = 0; i < sequenceLength; i++) {
     unsigned long detectedAt = 0;
     int pressed = waitForButtonPress(startTime, limitMs, timedOut, detectedAt);
+    if (sessionAbandoned) return false;
     if (timedOut) break;
 
     unsigned long reaction = detectedAt - waitStart;     // time for this one button
@@ -425,6 +552,7 @@ void getPlayerInput() {
 
   responseTime = millis() - startTime;
   inputTimedOut = timedOut;
+  return true;
 }
 
 // Returns button index 0-6, or -1 if time ran out.
@@ -434,6 +562,7 @@ int waitForButtonPress(unsigned long roundStart, unsigned long limitMs, bool &ti
       timedOut = true;
       return -1;
     }
+    if (checkPhysicalAbandon()) return -2;
     refreshTurnTimer(roundStart);        // OLED countdown (redraws once per second)
     for (int i = 0; i < 7; i++) {
       if (digitalRead(BUTTON_PINS[i]) == LOW) {
@@ -452,16 +581,20 @@ int waitForButtonPress(unsigned long roundStart, unsigned long limitMs, bool &ti
 void checkInput() {
   totalRounds++;
   bool inputCorrect = !inputTimedOut;
-  uint8_t wrongMask = 0;
+  uint32_t incorrectPositionMask = 0;
+  uint8_t pressedAt[MAX_SEQUENCE] = {0};
+  uint8_t expectedAt[MAX_SEQUENCE] = {0};
 
   for (int i = 0; i < answeredInRound; i++) {
     if (playerInput[i] != sequence[i]) {
       inputCorrect = false;
-      wrongMask |= (uint8_t)(1 << sequence[i]);   // remember which button was missed
+      incorrectPositionMask |= (uint32_t)(1UL << i);
+      pressedAt[i] = (uint8_t)(playerInput[i] + 1);
+      expectedAt[i] = (uint8_t)(sequence[i] + 1);
     }
   }
 
-  addRoundLog(inputCorrect, inputTimedOut, wrongMask);   // before level changes
+  addRoundLog(inputCorrect, inputTimedOut, incorrectPositionMask, pressedAt, expectedAt);   // before level changes
 
   if (inputCorrect) {
     updateOnCorrect();
@@ -472,10 +605,11 @@ void checkInput() {
   delay(1000);
 }
 
-void addRoundLog(bool correct, bool timedOut, uint8_t wrongMask) {
-  if (roundLogCount >= MAX_LOGGED_ROUNDS) {           // keep only the most recent rounds
-    memmove(&roundLog[0], &roundLog[1], sizeof(RoundLog) * (MAX_LOGGED_ROUNDS - 1));
-    roundLogCount = MAX_LOGGED_ROUNDS - 1;
+void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
+                 const uint8_t* pressedAt, const uint8_t* expectedAt) {
+  if (roundLogCount >= MAX_LOGGED_ROUNDS) {
+    Serial.println("ERROR: round telemetry capacity exceeded");
+    return;
   }
   RoundLog &r = roundLog[roundLogCount++];
   r.round = (uint8_t)totalRounds;
@@ -484,21 +618,37 @@ void addRoundLog(bool correct, bool timedOut, uint8_t wrongMask) {
   r.correct = correct;
   r.timedOut = timedOut;
   r.responseMs = (uint32_t)responseTime;
-  r.wrongMask = wrongMask;
-}
+  r.incorrectPositionMask = incorrectPositionMask;
+  memcpy(r.pressedAt, pressedAt, sizeof(r.pressedAt));
+  memcpy(r.expectedAt, expectedAt, sizeof(r.expectedAt));
 
+  LevelStats &st = levelStats[level];
+  st.attempted++;
+  if (correct) st.correct++;
+  else st.mistakes++; // failed sequence / timeout count
+  for (int pos = 0; pos < sequenceLength; pos++) {
+    if (incorrectPositionMask & (1UL << pos)) st.incorrectPresses++;
+  }
+  st.sequenceLength = (uint8_t)sequenceLength;
+  st.responseTotalMs += (uint32_t)responseTime;
+  st.responseSamples++;
+  if (st.responseSamples == 1 || responseTime < st.fastestResponseMs)
+    st.fastestResponseMs = (uint32_t)responseTime;
+  if (responseTime > st.slowestResponseMs)
+    st.slowestResponseMs = (uint32_t)responseTime;
+}
 void updateOnCorrect() {
   correctRounds++;
   int points = calcPoints(level, responseTime);
   score += points;
 
+  if (level > highestLevel) highestLevel = level; // record the level just completed
   if (level >= MAX_LEVEL) {
-    allLevelsCleared = true;             // Level 20 done: the game ends here
+    allLevelsCleared = true;
   } else {
     level++;
     sequenceLength++;
   }
-  if (level > highestLevel) highestLevel = level;
 
   playTone(1200, 200);
   showMessage("CORRECT!", "+" + String(points) + "  Score: " + String(score));
@@ -607,21 +757,37 @@ void buildPayload(char* buf, size_t n) {
       "\"avg_response_time_ms\":null,\"fastest_response_time_ms\":null,\"slowest_response_time_ms\":null,");
   }
 
+  // Per-level summaries are cumulative across every attempt, not a rolling
+  // sample. Each level row also contains every incorrect press position.
   appendf(buf, n, len, "\"round_data\":[");
-  for (int r = 0; r < roundLogCount; r++) {
-    if (n - len < 220) break;                       // always leave room to close the JSON
-    const RoundLog &g = roundLog[r];
-    if (r > 0) appendf(buf, n, len, ",");
+  bool firstLevel = true;
+  for (int lvl = 1; lvl <= MAX_LEVEL; lvl++) {
+    const LevelStats &st = levelStats[lvl];
+    if (!st.attempted) continue;
+    if (!firstLevel) appendf(buf, n, len, ",");
+    firstLevel = false;
+    float levelAccuracy = 100.0f * st.correct / st.attempted;
+    float avgResponse = st.responseSamples
+      ? (float)st.responseTotalMs / st.responseSamples : 0.0f;
     appendf(buf, n, len,
-      "{\"round\":%u,\"level\":%u,\"sequence_length\":%u,\"correct\":%s,\"timed_out\":%s,"
-      "\"response_ms\":%lu,\"incorrect_buttons\":[",
-      g.round, g.level, g.seqLen, g.correct ? "true" : "false", g.timedOut ? "true" : "false",
-      (unsigned long)g.responseMs);
-    bool first = true;
-    for (int b = 0; b < 7; b++) {
-      if (g.wrongMask & (1 << b)) {
-        appendf(buf, n, len, "%s\"%d\"", first ? "" : ",", b + 1);
-        first = false;
+      "{\"l\":%d,\"a\":%u,\"c\":%u,\"m\":%u,\"ip\":%u,"
+      "\"acc\":%.2f,\"avg\":%.1f,\"fast\":%lu,\"slow\":%lu,"
+      "\"n\":%u,\"d\":[",
+      lvl, st.attempted, st.correct, st.mistakes, st.incorrectPresses, levelAccuracy, avgResponse,
+      (unsigned long)st.fastestResponseMs, (unsigned long)st.slowestResponseMs,
+      st.sequenceLength);
+
+    bool firstDetail = true;
+    for (int r = 0; r < roundLogCount; r++) {
+      const RoundLog &g = roundLog[r];
+      if (g.level != lvl) continue;
+      for (int pos = 0; pos < g.seqLen; pos++) {
+        if (!(g.incorrectPositionMask & (1UL << pos))) continue;
+        if (!firstDetail) appendf(buf, n, len, ",");
+        firstDetail = false;
+        appendf(buf, n, len,
+          "[%u,%d,%u,%u,%u]",
+          g.round, pos + 1, g.pressedAt[pos], g.expectedAt[pos], g.seqLen);
       }
     }
     appendf(buf, n, len, "]}");
@@ -996,7 +1162,7 @@ void refreshTurnTimer(unsigned long roundStart) {
 void showIdle(IdleStatus s) {
   if (s == idleShown) return;                // only redraw when something changed
   idleShown = s;
-  if (s == IDLE_READY)          showMessage("WAITING FOR", "PLAYER - tap START on phone");
+  if (s == IDLE_READY)          showMessage("WAITING FOR", "Start on phone / web");
   else if (s == IDLE_NO_WIFI)   showMessage("NO WI-FI", "Reconnecting...");
   else if (s == IDLE_NO_SERVER) showMessage("NO SERVER", "Retrying...");
   else if (s == IDLE_BAD_TOKEN) showMessage("BAD TOKEN", "Check DEVICE_TOKEN");

@@ -22,3 +22,6 @@ create table if not exists public.game_results (
 );
 alter table public.game_sessions enable row level security;
 alter table public.game_results enable row level security;
+
+comment on column public.game_results.round_data is
+'Per-level Intelligent System telemetry: sequence attempts, correct sequences, failed sequences, accuracy, whole-sequence response-time summaries, sequence length, and incorrect press position details.';

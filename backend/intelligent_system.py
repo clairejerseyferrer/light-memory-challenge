@@ -1,22 +1,23 @@
 """Rule-based Intelligent System for Light Memory Challenge.
 
 Rules follow Intelligent_System.pdf (Part 2 and Part 3).
-Per-level round_data contract:
+Per-level round_data contract (expanded by FastAPI from the compact ESP32 payload):
 [
   {
     "level": 3,
     "sequences_attempted": 5,
-    "correct_sequences": 2,
-    "mistakes": 4,
-    "avg_response_time_ms": 12000,  # average time to complete a sequence
+    "correct_sequences": 4,
+    "mistakes": 1,  # failed sequence attempts, including timeouts
+    "incorrect_press_count": 2,  # individual wrong button presses
+    "accuracy": 80.0,  # backend recalculates from correct / attempted
+    "avg_response_time_ms": 12000,  # average time to complete a whole sequence
+    "fastest_response_time_ms": 9000,
+    "slowest_response_time_ms": 15000,
     "sequence_length": 4,
-    "incorrect_buttons": ["green", "green"],
-    "mistake_positions": [3, 4, 4]
+    "incorrect_press_details": [[2, 3, 2, 4, 4]]
+    # detail tuple = [round, position, pressed_button, expected_button, sequence_length]
   }
 ]
-`incorrect_buttons` and `mistake_positions` may alternatively be supplied
-as session-level arrays on any round_data item. Missing optional telemetry
-does not fabricate a recommendation.
 """
 from __future__ import annotations
 
@@ -73,10 +74,15 @@ def _metrics(row: dict[str, Any]) -> dict[str, Any]:
         "sequences_attempted": attempted,
         "correct_sequences": correct,
         "mistakes": mistakes,
+        "incorrect_press_count": int(_number(row.get("incorrect_press_count"))),
         "accuracy": accuracy,
         "time_per_button_press_seconds": time_per_press,
         "mistake_rate": mistake_rate,
         "sequence_length": int(sequence_length),
+        "incorrect_press_details": (
+            row.get("incorrect_press_details")
+            if isinstance(row.get("incorrect_press_details"), list) else []
+        ),
     }
 
 
@@ -184,11 +190,30 @@ def _recommendations(round_data: list[dict[str, Any]], metrics: dict[str, Any],
     # Rule 4: repeated mistakes on one specific button. Rule 3 (general
     # frequent mistakes) is only used when this more specific rule does not fire.
     button_counts: Counter[str] = Counter()
+    all_mistake_positions: list[tuple[int, int]] = []
     for row in round_data or []:
-        if isinstance(row, dict):
-            values = row.get("incorrect_buttons", [])
-            if isinstance(values, list):
-                button_counts.update(str(v) for v in values if v is not None)
+        if not isinstance(row, dict):
+            continue
+        values = row.get("incorrect_buttons", [])
+        if isinstance(values, list):
+            button_counts.update(str(v) for v in values if v is not None)
+        details = row.get("incorrect_press_details", [])
+        if isinstance(details, list):
+            for detail in details:
+                if isinstance(detail, dict):
+                    button = detail.get("pressed_button")
+                    pos = int(_number(detail.get("position")))
+                    seq_len = int(_number(detail.get("sequence_length")))
+                elif isinstance(detail, list) and len(detail) >= 5:
+                    pos = int(_number(detail[1]))
+                    button = detail[2]
+                    seq_len = int(_number(detail[4]))
+                else:
+                    continue
+                if button is not None:
+                    button_counts.update([str(button)])
+                if pos > 0 and seq_len > 0:
+                    all_mistake_positions.append((pos, seq_len))
     total_button_mistakes = sum(button_counts.values())
     repeated_button = None
     if total_button_mistakes >= 3 and button_counts:
@@ -241,26 +266,11 @@ def _recommendations(round_data: list[dict[str, Any]], metrics: dict[str, Any],
         )
 
     # Rule 7: late-sequence errors; requires position telemetry.
-    positions = []
-    for row in round_data or []:
-        if isinstance(row, dict) and isinstance(row.get("mistake_positions"), list):
-            positions.extend(
-                int(_number(v)) for v in row["mistake_positions"]
-                if _number(v) > 0
-            )
-    if len(positions) >= 5:
-        # Sequence length can vary; compare each position against half of the
-        # sequence length recorded for its row when available.
-        late = total = 0
-        for row in round_data or []:
-            if not isinstance(row, dict):
-                continue
-            row_positions = row.get("mistake_positions", [])
-            length = int(_number(row.get("sequence_length")))
-            if length > 0 and isinstance(row_positions, list):
-                total += len(row_positions)
-                late += sum(1 for pos in row_positions if _number(pos) > length / 2)
-        if total >= 5 and late / total >= 0.60:
+    # Rule 7: late-sequence errors, using the position of each individual
+    # incorrect press supplied by the firmware.
+    if len(all_mistake_positions) >= 5:
+        late = sum(1 for pos, length in all_mistake_positions if pos > length / 2)
+        if late / len(all_mistake_positions) >= 0.60:
             recommendations.append(
                 "Try grouping the sequence into small chunks of 2 to 3 buttons."
             )
@@ -299,6 +309,7 @@ def analyze_performance(accuracy, mistakes, avg_response_time_ms, round_data=Non
                 "sequence_length",
                 "per_level_average_sequence_response_time",
                 "per_level_mistakes",
+                "incorrect_press_positions",
             ],
         }
 
@@ -313,6 +324,17 @@ def analyze_performance(accuracy, mistakes, avg_response_time_ms, round_data=Non
     target_level = max(1, target_level)
 
     recommendations = _recommendations(round_data, metrics, decision)
+    per_level_analysis = []
+    for row in level_rows:
+        row_metrics = _metrics(row)
+        row_decision = classify_level(row_metrics)
+        per_level_analysis.append({
+            **row_metrics,
+            "classification": row_decision["classification"],
+            "proposed_level_adjustment": row_decision["difficulty_adjustment"],
+            "metric_bands": row_decision["metric_bands"],
+            "data_sufficient": row_metrics["sequences_attempted"] >= 3,
+        })
     if metrics["sequences_attempted"] < 3:
         recommendations = [
             "None. Wait until at least 3 sequences have been attempted in this level."
@@ -326,7 +348,13 @@ def analyze_performance(accuracy, mistakes, avg_response_time_ms, round_data=Non
         "reason": decision["reason"],
         "metric_bands": decision["metric_bands"],
         "metrics": metrics,
+        "per_level_analysis": per_level_analysis,
         "recommendations": recommendations,
         "rules_version": RULES_VERSION,
-        "data_status": "complete_for_classification",
+        "data_status": (
+            "complete_for_classification"
+            if metrics["sequences_attempted"] >= 3
+            else "insufficient_sequences_for_classification"
+        ),
+        "minimum_sequences_required": 3,
     }

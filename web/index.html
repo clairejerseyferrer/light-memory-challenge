@@ -142,6 +142,28 @@
         padding: 4px 8px;
         font-size: 0.8rem;
       }
+      .table-wrap {
+        width: 100%;
+        overflow-x: auto;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        margin: 12px 0;
+      }
+      table {
+        width: 100%;
+        min-width: 620px;
+        border-collapse: collapse;
+        font-size: 0.88rem;
+      }
+      th, td {
+        padding: 10px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        vertical-align: top;
+      }
+      th { color: var(--accent); background: #111724; }
+      tr:last-child td { border-bottom: 0; }
+      .section-heading { margin: 22px 0 8px; }
       .recommendation {
         padding: 10px;
         border-left: 3px solid var(--accent);
@@ -166,7 +188,7 @@
       <div class="eyebrow">IoT Laboratory Game</div>
       <h1>Light Memory Challenge</h1>
       <p class="muted">
-        Start a game or search for previous sessions using your codename.
+        Create a session from your phone, then start it when your turn arrives. The board button is reserved for abandoning/resetting an active session.
       </p>
       <nav class="tabs">
         <button class="tab active" id="tabStart">Start a Game</button
@@ -199,7 +221,8 @@
           </div>
           <button class="secondary full" id="copyButton">Copy Session ID</button>
           <p id="queueInfo" class="message small"></p>
-          <button class="primary full" id="startButton">START GAME</button>
+          <p class="small muted">Start from this page. On the physical board, hold the reset/abandon button for 2 seconds to cancel the active session.</p>
+          <button class="primary full" id="startButton">START GAME ON THIS PHONE</button>
           <button class="secondary full hidden" id="abandonButton">Abandon Session</button>
           <div class="countdown hidden" id="countdown">5</div>
           <p id="status" class="message" role="status" aria-live="polite"></p>
@@ -408,7 +431,7 @@
           const canStart = Boolean(s.is_next);
           $("startButton").classList.remove("hidden");
           $("startButton").disabled = !canStart;
-          $("startButton").textContent = canStart ? "START GAME" : "WAIT FOR YOUR TURN";
+          $("startButton").textContent = canStart ? "START GAME ON THIS PHONE" : "WAIT FOR YOUR TURN";
           $("abandonButton").classList.remove("hidden");
           $("abandonButton").disabled = false;
           $("countdown").classList.add("hidden");
@@ -528,9 +551,58 @@
           el.innerHTML = `<div class="card"><h2>${esc(s.display_id)}</h2><p>This session is ${esc(s.status)}. Results will appear after the game is completed.</p></div>`;
           return;
         }
-        const a = r.analysis || {},
-          recs = Array.isArray(a.recommendations) ? a.recommendations : [];
-        el.innerHTML = `<div class="card"><div class="sessionid">${esc(s.display_id)}</div><p class="muted">Player: ${esc(s.codename)}</p><div class="grid"><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Points</span><strong>${Number(r.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${r.highest_level}</strong></div><div class="stat"><span class="label">Accuracy</span><strong>${Number(r.accuracy).toFixed(1)}%</strong></div><div class="stat"><span class="label">Mistakes</span><strong>${r.mistakes}</strong></div><div class="stat"><span class="label">Avg. Response</span><strong>${r.avg_response_time_ms == null ? "—" : Number(r.avg_response_time_ms).toFixed(0) + " ms"}</strong></div></div><h2>Performance Analysis</h2><p>Classification: <strong>${esc(a.classification || "Not available")}</strong></p><p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p><h2>Recommendations</h2>${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}<p class="small muted">IS thresholds are provisional and need team approval.</p></div>`;
+        const a = r.analysis || {};
+        const recs = Array.isArray(a.recommendations) ? a.recommendations : [];
+        const levels = Array.isArray(r.round_data) ? r.round_data : [];
+        const levelRows = levels.map((x) => {
+          const details = Array.isArray(x.incorrect_press_details) ? x.incorrect_press_details : [];
+          const positions = details.length
+            ? details.map((d) => {
+                const round = Array.isArray(d) ? d[0] : d.round;
+                const pos = Array.isArray(d) ? d[1] : d.position;
+                const pressed = Array.isArray(d) ? d[2] : d.pressed_button;
+                const expected = Array.isArray(d) ? d[3] : d.expected_button;
+                return `Round ${esc(round)}, position ${esc(pos)} (pressed ${esc(pressed)}, expected ${esc(expected)})`;
+              }).join("<br>")
+            : "None recorded";
+          return `<tr>
+            <td>Level ${esc(x.level)}</td>
+            <td>${Number(x.sequences_attempted || 0)}</td>
+            <td>${Number(x.mistakes || 0)}</td>
+            <td>${Number(x.incorrect_press_count || 0)}</td>
+            <td>${Number(x.accuracy || 0).toFixed(1)}%</td>
+            <td>${x.avg_response_time_ms == null ? "—" : Number(x.avg_response_time_ms).toFixed(0) + " ms"}</td>
+            <td>${x.fastest_response_time_ms == null ? "—" : Number(x.fastest_response_time_ms).toFixed(0) + " ms"} / ${x.slowest_response_time_ms == null ? "—" : Number(x.slowest_response_time_ms).toFixed(0) + " ms"}</td>
+            <td>${positions}</td>
+          </tr>`;
+        }).join("");
+        const perLevelAnalysis = Array.isArray(a.per_level_analysis) ? a.per_level_analysis : [];
+        const classifications = perLevelAnalysis.map((x) =>
+          `<span class="pill">L${esc(x.level)}: ${esc(x.classification)}${x.data_sufficient ? "" : " · insufficient data"}</span>`
+        ).join(" ");
+        el.innerHTML = `<div class="card">
+          <div class="sessionid">${esc(s.display_id)}</div>
+          <p class="muted">Player: ${esc(s.codename)}</p>
+          <div class="grid">
+            <div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div>
+            <div class="stat"><span class="label">Points</span><strong>${Number(r.score).toLocaleString()}</strong></div>
+            <div class="stat"><span class="label">Highest Level</span><strong>${r.highest_level}</strong></div>
+            <div class="stat"><span class="label">Overall Accuracy</span><strong>${Number(r.accuracy).toFixed(1)}%</strong></div>
+            <div class="stat"><span class="label">Failed Sequences</span><strong>${r.mistakes}</strong></div>
+            <div class="stat"><span class="label">Avg. Button Response</span><strong>${r.avg_response_time_ms == null ? "—" : Number(r.avg_response_time_ms).toFixed(0) + " ms"}</strong></div>
+          </div>
+          <h2 class="section-heading">Intelligent System Analysis</h2>
+          <p>Latest level classification: <strong>${esc(a.classification || "Not available")}</strong></p>
+          <p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p>
+          <p class="small muted">${esc(a.reason || (a.data_status === "insufficient_per_level_data" ? "Per-level telemetry is missing; no difficulty adjustment was inferred." : ""))}</p>
+          ${classifications ? `<p class="small">${classifications}</p>` : ""}
+          <h2 class="section-heading">Per-Level Performance</h2>
+          <p class="small muted">Each level shows cumulative sequence attempts, failed sequences, individual incorrect presses, accuracy, response-time summaries, and the exact position of each incorrect press.</p>
+          ${levels.length ? `<div class="table-wrap"><table><thead><tr><th>Level</th><th>Sequences</th><th>Failed Sequences</th><th>Incorrect Presses</th><th>Accuracy</th><th>Avg. Sequence Time</th><th>Fastest / Slowest</th><th>Incorrect Press Details</th></tr></thead><tbody>${levelRows}</tbody></table></div>` : `<p>Per-level summaries were not included in this result.</p>`}
+          <h2 class="section-heading">Recommendations</h2>
+          ${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}
+          <p class="small muted">IS thresholds are provisional and require team approval. A level needs at least 3 attempted sequences before classification is considered sufficient.</p>
+        </div>`;
       }
 
       async function restoreSavedSession() {

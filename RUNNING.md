@@ -71,40 +71,34 @@ Do not append a backslash to `8000`. In PowerShell, a backslash is not the line-
 
 - Session ID is stored in browser `localStorage`, then fetched from the backend after reload so the backend remains the source of truth.
 - The queue allows at most three sessions in `waiting` status per device, and only the first waiting player can start when no game is active.
-- Abandonment is supported by the web API. The firmware must call the authenticated `POST /api/device/abandon` endpoint for a physical-device abandon button to trigger the same backend state change.
+- GPIO15 is now the physical abandon/reset button only. Hold it for 2 seconds during countdown or gameplay; it never starts a game. The website remains responsible for starting a queued session.
+- The ESP32 calls authenticated `POST /api/device/abandon` with the exact `device_id` and `session_id`. If Wi-Fi is unavailable, that exact session ID is persisted and retried before the board accepts another start command.
 - The website countdown uses a monotonic browser timer and server-provided remaining milliseconds rather than comparing the phone's wall clock directly to a UTC timestamp. Network delay or a backgrounded mobile tab can still affect what the player sees, while the backend's scheduled start remains authoritative.
 
 
 ## Intelligent System telemetry contract
 
-The proposed rules in `Intelligent_System.pdf` make decisions after each
-completed level. To classify a level correctly, the ESP32 must submit
-`round_data` as per-level summaries, for example:
+The firmware now sends cumulative per-level summaries in `round_data`. For
+each level the summary includes:
+- `sequences_attempted`: every sequence shown and attempted at that level.
+- `correct_sequences`: successfully completed sequences.
+- `mistakes`: failed sequences, including timeouts (one failed attempt = one mistake).
+- `incorrect_press_count`: count of individual wrong button presses; kept separate
+  from failed-sequence count so the IS mistake-rate denominator remains sequences.
+- `accuracy`: recalculated by the backend from correct / attempted sequences.
+- `avg_response_time_ms`, `fastest_response_time_ms`, and
+  `slowest_response_time_ms`: whole-sequence response-time statistics.
+- `sequence_length`: the number of buttons in that level's sequence.
+- `incorrect_press_details`: compact entries `[round, position, pressed_button,
+  expected_button, sequence_length]` for every incorrect press.
 
-```json
-[
-  {
-    "level": 3,
-    "sequences_attempted": 5,
-    "correct_sequences": 4,
-    "mistakes": 2,
-    "accuracy": 80,
-    "avg_response_time_ms": 12000,
-    "sequence_length": 4,
-    "incorrect_buttons": ["green", "green"],
-    "mistake_positions": [3, 4]
-  }
-]
-```
+The firmware uses compact JSON keys to keep the offline ESP32 result queue
+small. FastAPI expands them to descriptive field names before storing the
+result and running the Intelligent System. Average sequence time is divided by
+sequence length to derive average time per button press.
 
-`avg_response_time_ms` here means average time to complete a whole sequence;
-the IS divides it by `sequence_length` to calculate seconds per button press.
-`mistakes` is the number of mistakes for that level. `incorrect_buttons` and
-`mistake_positions` support the optional recommendation rules. The IS needs
-at least three attempted sequences in a level before classifying it.
-
-If per-level summaries are not supplied, the IS deliberately reports
-`insufficient_per_level_data` and does not guess from session-wide totals.
-The firmware currently needs to be checked/updated to send this exact
-information. Late-sequence mistake recommendations additionally require
-the position of each mistake.
+The IS does not infer a level classification until at least three sequences
+have been attempted at that level. The dashboard displays all level summaries,
+the per-level classification sufficiency, and exact incorrect press positions.
+No database column migration is required: the existing `game_results.round_data`
+JSONB column stores the expanded telemetry.
