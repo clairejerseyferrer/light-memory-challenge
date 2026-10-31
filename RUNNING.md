@@ -73,3 +73,38 @@ Do not append a backslash to `8000`. In PowerShell, a backslash is not the line-
 - The queue allows at most three sessions in `waiting` status per device, and only the first waiting player can start when no game is active.
 - Abandonment is supported by the web API. The firmware must call the authenticated `POST /api/device/abandon` endpoint for a physical-device abandon button to trigger the same backend state change.
 - The website countdown uses a monotonic browser timer and server-provided remaining milliseconds rather than comparing the phone's wall clock directly to a UTC timestamp. Network delay or a backgrounded mobile tab can still affect what the player sees, while the backend's scheduled start remains authoritative.
+
+
+## Intelligent System telemetry contract
+
+The proposed rules in `Intelligent_System.pdf` make decisions after each
+completed level. To classify a level correctly, the ESP32 must submit
+`round_data` as per-level summaries, for example:
+
+```json
+[
+  {
+    "level": 3,
+    "sequences_attempted": 5,
+    "correct_sequences": 4,
+    "mistakes": 2,
+    "accuracy": 80,
+    "avg_response_time_ms": 12000,
+    "sequence_length": 4,
+    "incorrect_buttons": ["green", "green"],
+    "mistake_positions": [3, 4]
+  }
+]
+```
+
+`avg_response_time_ms` here means average time to complete a whole sequence;
+the IS divides it by `sequence_length` to calculate seconds per button press.
+`mistakes` is the number of mistakes for that level. `incorrect_buttons` and
+`mistake_positions` support the optional recommendation rules. The IS needs
+at least three attempted sequences in a level before classifying it.
+
+If per-level summaries are not supplied, the IS deliberately reports
+`insufficient_per_level_data` and does not guess from session-wide totals.
+The firmware currently needs to be checked/updated to send this exact
+information. Late-sequence mistake recommendations additionally require
+the position of each mistake.

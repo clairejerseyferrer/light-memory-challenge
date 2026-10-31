@@ -393,6 +393,7 @@ def save_results(session_id: UUID, payload: GameResult):
         payload.mistakes,
         payload.avg_response_time_ms,
         payload.round_data,
+        highest_level=payload.highest_level,
     )
 
     row = {
