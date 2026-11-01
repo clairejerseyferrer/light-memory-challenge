@@ -142,27 +142,20 @@
         padding: 4px 8px;
         font-size: 0.8rem;
       }
-      .table-wrap {
-        width: 100%;
-        overflow-x: auto;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        margin: 12px 0;
-      }
-      table {
-        width: 100%;
-        min-width: 620px;
-        border-collapse: collapse;
-        font-size: 0.88rem;
-      }
-      th, td {
-        padding: 10px 12px;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        vertical-align: top;
-      }
-      th { color: var(--accent); background: #111724; }
-      tr:last-child td { border-bottom: 0; }
+      .level-chart { display: grid; gap: 12px; margin: 14px 0; }
+      .level-card { background: #111724; border: 1px solid var(--border); border-radius: 13px; padding: 13px; min-width: 0; }
+      .level-top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
+      .level-name { font-weight:850; }
+      .metric-line { display:grid; grid-template-columns: minmax(88px, 112px) 1fr auto; gap:8px; align-items:center; margin:9px 0; font-size:.88rem; }
+      .bar-track { height:11px; background:#303951; border-radius:99px; overflow:hidden; min-width:0; }
+      .bar-fill { height:100%; background:var(--accent); border-radius:99px; }
+      .bar-fill.time { background:#7dd3fc; }
+      .level-meta { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
+      .mini-stat { background:#1b2435; border-radius:9px; padding:8px; min-width:0; }
+      .mini-stat strong { display:block; font-size:1rem; overflow-wrap:anywhere; }
+      .details { margin-top:10px; font-size:.84rem; color:var(--muted); overflow-wrap:anywhere; }
+      .details summary { cursor:pointer; color:var(--accent); font-weight:700; }
+      .confidence { font-size:.76rem; color:var(--muted); }
       .section-heading { margin: 22px 0 8px; }
       .recommendation {
         padding: 10px;
@@ -222,7 +215,7 @@
           <button class="secondary full" id="copyButton">Copy Session ID</button>
           <p id="queueInfo" class="message small"></p>
           <p class="small muted">Start from this page. On the physical board, hold the reset/abandon button for 2 seconds to cancel the active session.</p>
-          <button class="primary full" id="startButton">START GAME ON THIS PHONE</button>
+          <button class="primary full" id="startButton">START THE GAME</button>
           <button class="secondary full hidden" id="abandonButton">Abandon Session</button>
           <div class="countdown hidden" id="countdown">5</div>
           <p id="status" class="message" role="status" aria-live="polite"></p>
@@ -554,29 +547,34 @@
         const a = r.analysis || {};
         const recs = Array.isArray(a.recommendations) ? a.recommendations : [];
         const levels = Array.isArray(r.round_data) ? r.round_data : [];
-        const levelRows = levels.map((x) => {
-          const details = Array.isArray(x.incorrect_press_details) ? x.incorrect_press_details : [];
-          const positions = details.length
-            ? details.map((d) => {
-                const round = Array.isArray(d) ? d[0] : d.round;
-                const pos = Array.isArray(d) ? d[1] : d.position;
-                const pressed = Array.isArray(d) ? d[2] : d.pressed_button;
-                const expected = Array.isArray(d) ? d[3] : d.expected_button;
-                return `Round ${esc(round)}, position ${esc(pos)} (pressed ${esc(pressed)}, expected ${esc(expected)})`;
-              }).join("<br>")
-            : "None recorded";
-          return `<tr>
-            <td>Level ${esc(x.level)}</td>
-            <td>${Number(x.sequences_attempted || 0)}</td>
-            <td>${Number(x.mistakes || 0)}</td>
-            <td>${Number(x.incorrect_press_count || 0)}</td>
-            <td>${Number(x.accuracy || 0).toFixed(1)}%</td>
-            <td>${x.avg_response_time_ms == null ? "—" : Number(x.avg_response_time_ms).toFixed(0) + " ms"}</td>
-            <td>${x.fastest_response_time_ms == null ? "—" : Number(x.fastest_response_time_ms).toFixed(0) + " ms"} / ${x.slowest_response_time_ms == null ? "—" : Number(x.slowest_response_time_ms).toFixed(0) + " ms"}</td>
-            <td>${positions}</td>
-          </tr>`;
-        }).join("");
         const perLevelAnalysis = Array.isArray(a.per_level_analysis) ? a.per_level_analysis : [];
+        const levelCards = levels.map((x) => {
+          const details = Array.isArray(x.incorrect_press_details) ? x.incorrect_press_details : [];
+          const attempts = Number(x.sequences_attempted || 0);
+          const accuracy = Math.max(0, Math.min(100, Number(x.accuracy || 0)));
+          const avgMs = x.avg_response_time_ms == null ? null : Number(x.avg_response_time_ms);
+          const maxMs = Math.max(1, ...levels.map(v => Number(v.avg_response_time_ms || 0)));
+          const detailText = details.length ? details.map((d) => {
+            const round = Array.isArray(d) ? d[0] : d.round;
+            const pos = Array.isArray(d) ? d[1] : d.position;
+            const pressed = Array.isArray(d) ? d[2] : d.pressed_button;
+            const expected = Array.isArray(d) ? d[3] : d.expected_button;
+            return `<div>Round ${esc(round)} · Position ${esc(pos)} · Pressed ${esc(pressed)} / Expected ${esc(expected)}</div>`;
+          }).join("") : "No incorrect press positions recorded.";
+          const analysis = perLevelAnalysis.find(v => Number(v.level) === Number(x.level));
+          return `<article class="level-card">
+            <div class="level-top"><span class="level-name">Level ${esc(x.level)}</span><span class="pill">${esc(analysis?.classification || "Unclassified")}</span></div>
+            <div class="metric-line"><span>Accuracy</span><div class="bar-track"><div class="bar-fill" style="width:${accuracy}%"></div></div><strong>${accuracy.toFixed(1)}%</strong></div>
+            <div class="metric-line"><span>Avg. sequence time</span><div class="bar-track"><div class="bar-fill time" style="width:${avgMs == null ? 0 : Math.min(100, avgMs / maxMs * 100)}%"></div></div><strong>${avgMs == null ? "—" : (avgMs / 1000).toFixed(1) + "s"}</strong></div>
+            <div class="level-meta">
+              <div class="mini-stat"><span class="small muted">Sequences</span><strong>${attempts}</strong></div>
+              <div class="mini-stat"><span class="small muted">Failed sequences</span><strong>${Number(x.mistakes || 0)}</strong></div>
+              <div class="mini-stat"><span class="small muted">Incorrect presses</span><strong>${Number(x.incorrect_press_count || 0)}</strong></div>
+              <div class="mini-stat"><span class="small muted">Fastest / slowest</span><strong>${x.fastest_response_time_ms == null ? "—" : (Number(x.fastest_response_time_ms)/1000).toFixed(1)+"s"} / ${x.slowest_response_time_ms == null ? "—" : (Number(x.slowest_response_time_ms)/1000).toFixed(1)+"s"}</strong></div>
+            </div>
+            <details class="details"><summary>Incorrect press positions (${details.length})</summary>${detailText}</details>
+          </article>`;
+        }).join("");
         const classifications = perLevelAnalysis.map((x) =>
           `<span class="pill">L${esc(x.level)}: ${esc(x.classification)}${x.data_sufficient ? "" : " · insufficient data"}</span>`
         ).join(" ");
@@ -598,10 +596,10 @@
           ${classifications ? `<p class="small">${classifications}</p>` : ""}
           <h2 class="section-heading">Per-Level Performance</h2>
           <p class="small muted">Each level shows cumulative sequence attempts, failed sequences, individual incorrect presses, accuracy, response-time summaries, and the exact position of each incorrect press.</p>
-          ${levels.length ? `<div class="table-wrap"><table><thead><tr><th>Level</th><th>Sequences</th><th>Failed Sequences</th><th>Incorrect Presses</th><th>Accuracy</th><th>Avg. Sequence Time</th><th>Fastest / Slowest</th><th>Incorrect Press Details</th></tr></thead><tbody>${levelRows}</tbody></table></div>` : `<p>Per-level summaries were not included in this result.</p>`}
+          ${levels.length ? `<div class="level-chart">${levelCards}</div>` : `<p>Per-level summaries were not included in this result.</p>`}
           <h2 class="section-heading">Recommendations</h2>
           ${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}
-          <p class="small muted">IS thresholds are provisional and require team approval. A level needs at least 3 attempted sequences before classification is considered sufficient.</p>
+          <p class="small muted">IS confidence: ${esc(a.confidence || "not available")}. One completed sequence allows a provisional assessment; two or more sequences provide a more reliable pattern. ${esc(a.confidence_note || "")}</p>
         </div>`;
       }
 

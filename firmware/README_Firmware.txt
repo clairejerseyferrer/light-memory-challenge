@@ -54,3 +54,10 @@ Known limitations / testing
 - Wi-Fi loss does not stop gameplay. Completed results are kept in ESP32 Preferences and retried later.
 - Abandonment is retried before the board accepts another session, preventing a stale offline abandon from cancelling a later player's session.
 - The backend remains authoritative for queue order and session status.
+
+
+PHYSICAL ABANDON BUTTON UPDATE
+- Hold the configured GPIO15 button for 2 seconds to abandon the board's current session.
+- This works for the active game, countdown, and the oldest waiting session when no game is active.
+- The website remains responsible for creating and starting sessions.
+- The board polls the backend for the exact session UUID before sending an abandonment request.

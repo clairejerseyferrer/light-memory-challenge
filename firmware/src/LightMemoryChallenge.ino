@@ -103,6 +103,7 @@ const int BUZZER_PIN     = 2;
 
 // ---------------- CURRENT SESSION (from the backend) ----------------
 char currentSessionId[40] = "";   // UUID
+char abandonTargetSessionId[40] = ""; // active or next waiting session
 char currentDisplayId[16] = "";   // "Session #001"
 char currentCodename[28]  = "";
 long currentStartAtEpoch  = 0;
@@ -281,6 +282,9 @@ void loop() {
     syncTime(3000);
     lastNtp = millis();
   }
+  // Allow the physical button to abandon a queued/countdown session even
+  // before a START command has populated currentSessionId.
+  if (!currentSessionId[0]) checkPhysicalAbandon();
   if (queueCount() > 0 && now - lastFlush > RETRY_INTERVAL_MS) {
     flushQueue(1);
     lastFlush = millis();
@@ -288,7 +292,14 @@ void loop() {
   // Retry an offline abandon before accepting another start command.
   if (pendingAbandonId[0] && now - lastPoll >= POLL_INTERVAL_MS) {
     lastPoll = now;
-    if (sendDeviceAbandon()) clearPendingAbandon();
+    if (sendDeviceAbandon()) {
+      clearPendingAbandon();
+      if (!currentSessionId[0]) {
+        sessionAbandoned = false;
+        abandonHoldReported = false;
+        abandonPressTiming = false;
+      }
+    }
   } else if (now - lastPoll >= POLL_INTERVAL_MS) {
     lastPoll = now;
     if (pollForStart()) {
@@ -369,7 +380,8 @@ void resetGame() {
 
 // Physical GPIO15 button is an abandon/reset control only. Hold for 2s.
 bool checkPhysicalAbandon() {
-  if (!currentSessionId[0] || sessionAbandoned || abandonHoldReported) return sessionAbandoned;
+  const char* targetId = currentSessionId[0] ? currentSessionId : abandonTargetSessionId;
+  if (!targetId[0] || sessionAbandoned || abandonHoldReported) return sessionAbandoned;
   if (digitalRead(ABANDON_BUTTON) == LOW) {
     if (!abandonPressTiming) {
       delay(25); // debounce
@@ -380,13 +392,23 @@ bool checkPhysicalAbandon() {
     } else if (millis() - abandonPressStartedAt >= ABANDON_HOLD_MS) {
       abandonHoldReported = true;
       sessionAbandoned = true;
-      strncpy(pendingAbandonId, currentSessionId, sizeof(pendingAbandonId) - 1);
+      strncpy(pendingAbandonId, targetId, sizeof(pendingAbandonId) - 1);
       prefs.begin("lmcq", false);
       prefs.putString("abandon", pendingAbandonId);
       prefs.end();
       showMessage("ABANDONING", "Resetting session...");
       Serial.printf("Physical abandon requested for %s\n", pendingAbandonId);
-      if (sendDeviceAbandon()) clearPendingAbandon();
+      if (sendDeviceAbandon()) {
+        clearPendingAbandon();
+        if (strcmp(currentSessionId, targetId) == 0) sessionAbandoned = true;
+        abandonTargetSessionId[0] = 0;
+        if (!currentSessionId[0]) {
+          showMessage("SESSION", "Abandoned");
+          sessionAbandoned = false;
+          abandonHoldReported = false;
+          abandonPressTiming = false;
+        }
+      }
       return true;
     }
   } else {
@@ -429,6 +451,7 @@ void clearPendingAbandon() {
 
 void clearCurrentSession() {
   currentSessionId[0] = 0;
+  abandonTargetSessionId[0] = 0;
   currentDisplayId[0] = 0;
   currentCodename[0] = 0;
   currentStartAtEpoch = 0;
@@ -502,7 +525,7 @@ void generateRandomSequence() {
 }
 
 bool displaySequenceUsingLEDs() {
-  showMessage("WATCH", "Hold RESET 2s to abandon");
+  showMessage("WATCH", "Hold RESET 2s to cancel");
   if (!delayWithAbandon(WATCH_PAUSE_MS)) return false;
   for (int i = 0; i < sequenceLength; i++) {
     if (checkPhysicalAbandon()) return false;
@@ -876,6 +899,11 @@ bool pollForStart() {
 
   char cmd[12];
   if (!jsonGetString(body.c_str(), "command", cmd, sizeof(cmd))) return false;
+  char abandonId[40] = "";
+  if (jsonGetString(body.c_str(), "abandon_session_id", abandonId, sizeof(abandonId)))
+    strncpy(abandonTargetSessionId, abandonId, sizeof(abandonTargetSessionId) - 1);
+  else
+    abandonTargetSessionId[0] = 0;
   if (strcmp(cmd, "START") != 0) return false;
 
   char sid[40] = "", did[16] = "", name[28] = "";

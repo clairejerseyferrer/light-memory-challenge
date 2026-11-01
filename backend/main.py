@@ -265,14 +265,14 @@ def device_abandon(payload: DeviceAbandon, x_device_token: str | None = Header(d
         return {"session_id": sid, "status": "abandoned", "idempotent": True}
     if session["status"] == "completed":
         return {"session_id": sid, "status": "completed", "ignored": True}
-    if session["status"] not in ("countdown", "playing"):
+    if session["status"] not in ("waiting", "countdown", "playing"):
         raise HTTPException(409, f"Session cannot be abandoned from status '{session['status']}'.")
     updated = (
         client.table("game_sessions")
         .update({"status": "abandoned"})
         .eq("id", sid)
         .eq("device_id", payload.device_id)
-        .in_("status", ["countdown", "playing"])
+        .in_("status", ["waiting", "countdown", "playing"])
         .execute()
     )
     if not updated.data:
@@ -288,11 +288,33 @@ def device_abandon(payload: DeviceAbandon, x_device_token: str | None = Header(d
 @app.get("/api/device/command")
 def device_command(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_token: str | None = Header(default=None)):
     require_device_token(x_device_token)
-    q = db().table("game_sessions").select("id,session_number,codename,device_id,start_at").eq("device_id", device_id).eq("status", "countdown").order("created_at", desc=True).limit(1).execute()
-    if not q.data: return {"command": "NONE"}
+    client = db()
+    # The board's physical abandon button targets the active countdown/game,
+    # or the oldest waiting session when nobody has started yet.
+    target_q = (client.table("game_sessions")
+        .select("id,session_number,codename,status,start_at")
+        .eq("device_id", device_id)
+        .in_("status", ["countdown", "playing"])
+        .order("created_at").limit(1).execute())
+    if not target_q.data:
+        target_q = (client.table("game_sessions")
+            .select("id,session_number,codename,status,start_at")
+            .eq("device_id", device_id).eq("status", "waiting")
+            .order("created_at").order("session_number").limit(1).execute())
+    target = target_q.data[0] if target_q.data else None
+    q = (client.table("game_sessions").select("id,session_number,codename,device_id,start_at")
+         .eq("device_id", device_id).eq("status", "countdown")
+         .order("created_at", desc=True).limit(1).execute())
+    if not q.data:
+        return {"command": "NONE", "abandon_session_id": target["id"] if target else None,
+                "abandon_display_id": readable_id(target["session_number"]) if target else None,
+                "abandon_status": target["status"] if target else None}
     row = q.data[0]
     start_at = dt_utc(row.get("start_at"))
-    if not start_at: return {"command": "NONE"}
+    if not start_at:
+        return {"command": "NONE", "abandon_session_id": target["id"] if target else None,
+                "abandon_display_id": readable_id(target["session_number"]) if target else None,
+                "abandon_status": target["status"] if target else None}
     remaining_seconds = max(
     0,
     int((start_at - datetime.now(timezone.utc)).total_seconds() + 0.999),
@@ -307,6 +329,9 @@ def device_command(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_t
         "start_at": start_at.isoformat(),
         "start_at_epoch": int(start_at.timestamp()),
         "countdown_seconds": remaining_seconds,
+        "abandon_session_id": target["id"] if target else None,
+        "abandon_display_id": readable_id(target["session_number"]) if target else None,
+        "abandon_status": target["status"] if target else None,
     }
     
 

@@ -47,10 +47,15 @@ class IntelligentSystemTests(unittest.TestCase):
                 self.assertEqual(result["classification"], expected_class)
                 self.assertEqual(result["proposed_level_adjustment"], expected_adjustment)
 
-    def test_minimum_three_sequences(self):
-        result = self.classify(100, .8, 0, attempts=2)
-        self.assertEqual(result["classification"], "Average")
-        self.assertEqual(result["proposed_level_adjustment"], 0)
+    def test_one_sequence_is_provisional_and_two_improve_confidence(self):
+        one = self.classify(100, .8, 0, attempts=1)
+        self.assertEqual(one["classification"], "Excellent")
+        self.assertEqual(one["confidence"], "low")
+        self.assertEqual(one["minimum_sequences_required"], 1)
+
+        two = self.classify(100, .8, 0, attempts=2)
+        self.assertEqual(two["classification"], "Excellent")
+        self.assertEqual(two["confidence"], "moderate")
 
     def test_missing_per_level_data_is_not_guessed(self):
         result = analyze_performance(95, 0, 500, [])

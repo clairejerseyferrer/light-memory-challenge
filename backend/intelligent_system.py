@@ -24,7 +24,8 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-RULES_VERSION = "pdf-proposal-1.0"
+RULES_VERSION = "pdf-proposal-1.1"
+MIN_SEQUENCES_FOR_CLASSIFICATION = 1
 MAX_GAME_LEVEL = 20  # Matches MAX_LEVEL in the current ESP32 firmware.
 CLASS_RANK = {"Struggling": 0, "Average": 1, "Good": 2, "Excellent": 3}
 
@@ -109,11 +110,11 @@ def _band(value: float | None, excellent: float, good: float, average: float,
 
 def classify_level(metrics: dict[str, Any]) -> dict[str, Any]:
     """Apply Part 2.1 and 2.2 to one level."""
-    if metrics["sequences_attempted"] < 3:
+    if metrics["sequences_attempted"] < MIN_SEQUENCES_FOR_CLASSIFICATION:
         return {
             "classification": "Average",
             "difficulty_adjustment": 0,
-            "reason": "Insufficient data: at least 3 sequences are required.",
+            "reason": "No sequence data is available for this level.",
             "metric_bands": {},
         }
 
@@ -176,7 +177,7 @@ def classify_level(metrics: dict[str, Any]) -> dict[str, Any]:
 def _recommendations(round_data: list[dict[str, Any]], metrics: dict[str, Any],
                      decision: dict[str, Any]) -> list[str]:
     recommendations: list[str] = []
-    if metrics["sequences_attempted"] >= 3 and metrics["accuracy"] < 60:
+    if metrics["sequences_attempted"] >= 1 and metrics["accuracy"] < 60:
         recommendations.append(
             "Focus on memorizing the complete sequence before inputting."
         )
@@ -226,7 +227,7 @@ def _recommendations(round_data: list[dict[str, Any]], metrics: dict[str, Any],
             )
     if (
         not repeated_button
-        and metrics["sequences_attempted"] >= 3
+        and metrics["sequences_attempted"] >= 1
         and metrics["mistake_rate"] > 0.50
     ):
         recommendations.append(
@@ -255,7 +256,7 @@ def _recommendations(round_data: list[dict[str, Any]], metrics: dict[str, Any],
         metrics["accuracy"] < 60
         and speed is not None
         and speed <= 1.0
-        and metrics["sequences_attempted"] >= 3
+        and metrics["sequences_attempted"] >= 1
     ):
         recommendations = [
             item for item in recommendations
@@ -268,7 +269,7 @@ def _recommendations(round_data: list[dict[str, Any]], metrics: dict[str, Any],
     # Rule 7: late-sequence errors; requires position telemetry.
     # Rule 7: late-sequence errors, using the position of each individual
     # incorrect press supplied by the firmware.
-    if len(all_mistake_positions) >= 5:
+    if len(all_mistake_positions) >= 2:
         late = sum(1 for pos, length in all_mistake_positions if pos > length / 2)
         if late / len(all_mistake_positions) >= 0.60:
             recommendations.append(
@@ -333,12 +334,9 @@ def analyze_performance(accuracy, mistakes, avg_response_time_ms, round_data=Non
             "classification": row_decision["classification"],
             "proposed_level_adjustment": row_decision["difficulty_adjustment"],
             "metric_bands": row_decision["metric_bands"],
-            "data_sufficient": row_metrics["sequences_attempted"] >= 3,
+            "data_sufficient": row_metrics["sequences_attempted"] >= 1,
+            "confidence": "moderate" if row_metrics["sequences_attempted"] >= 2 else ("low" if row_metrics["sequences_attempted"] == 1 else "none"),
         })
-    if metrics["sequences_attempted"] < 3:
-        recommendations = [
-            "None. Wait until at least 3 sequences have been attempted in this level."
-        ]
 
     return {
         "classification": decision["classification"],
@@ -353,8 +351,10 @@ def analyze_performance(accuracy, mistakes, avg_response_time_ms, round_data=Non
         "rules_version": RULES_VERSION,
         "data_status": (
             "complete_for_classification"
-            if metrics["sequences_attempted"] >= 3
-            else "insufficient_sequences_for_classification"
+            if metrics["sequences_attempted"] >= 2
+            else "provisional_single_sequence"
         ),
-        "minimum_sequences_required": 3,
+        "minimum_sequences_required": 1,
+        "confidence": "moderate" if metrics["sequences_attempted"] >= 2 else "low",
+        "confidence_note": "One sequence is enough for a provisional assessment; two or more provide a more reliable pattern. Interpret single-sequence recommendations cautiously.",
     }

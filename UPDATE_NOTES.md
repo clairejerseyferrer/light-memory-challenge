@@ -88,3 +88,14 @@ Copy the changed files above into the matching paths in your current repository.
 - Dashboard JavaScript syntax check with Node: passed.
 - Backend compact-telemetry normalization: checked with a representative payload.
 - The Arduino firmware was not compiled against the team's exact ESP32 board package and libraries here. Flash and test it on the actual board before relying on it at the event.
+
+
+## Follow-up update: mobile IS display, confidence, and idle abandonment
+
+- Replaced the wide per-level HTML table with responsive per-level metric cards and horizontal bars for accuracy and average sequence time. Detailed incorrect press positions are expandable per level.
+- Changed the IS minimum from 3 sequences to 1. A single sequence produces a **low-confidence/provisional** assessment; 2 or more produce **moderate confidence**. No data still produces no classification.
+- Updated recommendations so applicable observations can be surfaced after one sequence, while retaining multi-observation requirements for repeated-button patterns and using at least two recorded incorrect positions for the late-sequence pattern.
+- Expanded authenticated `/api/device/abandon` to accept `waiting` as well as `countdown` and `playing`.
+- `/api/device/command` now returns the session UUID the physical button should target: active countdown/game first, otherwise the oldest waiting session.
+- Firmware stores that target separately from the active gameplay session and checks the physical button while idle, so it can cancel a queued session even before the game starts.
+- No new database columns or migration are required; session status remains `abandoned`.
