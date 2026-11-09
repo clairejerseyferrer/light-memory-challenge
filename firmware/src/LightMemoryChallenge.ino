@@ -12,7 +12,7 @@
     4. The player plays the game on the board.
     5. At game over the ESP32 saves the result to flash, then sends it
        with  POST /api/sessions/{session_id}/results  and shows
-       rank / session ID / codename / score on the OLED.
+       rank / session ID / codename / score on the TFT.
 
   Failure handling (nothing is deleted until the server says OK):
     - Result is saved to flash BEFORE sending, so a power cut or no
@@ -29,21 +29,29 @@
   1 life and restarts the SAME level with a new sequence. Scoring and
   time limits are in the SCORING + TIME SETTINGS block below.
 
-  Hardware:
-    - 7 LEDs         -> GPIO 4, 5, 13, 14, 16, 17, 18
-    - 7 Game Buttons -> GPIO 19, 23, 25, 26, 27, 32, 33
+  Hardware (classic ESP32 DevKit / ESP32-WROOM):
+    - 7 LEDs         -> GPIO 4, 5, 13, 14, 16, 17, 19
+    - 7 Game Buttons -> GPIO 34, 35, 25, 26, 27, 32, 33
     - Abandon Button -> GPIO 15 (hold for 2 seconds during a session)
     - Buzzer         -> GPIO 2
-    - OLED (I2C)     -> SDA 21, SCL 22
+    - 1.8-inch ST7735 SPI TFT:
+        SCK  -> GPIO 18
+        MOSI -> GPIO 23
+        DC   -> GPIO 21
+        RST  -> GPIO 22
+        CS   -> GND (hardware SPI constructor uses CS = -1)
 
-  Libraries (Arduino Library Manager): Adafruit GFX, Adafruit SSD1306
+  IMPORTANT: GPIO 34 and 35 require external 10k pull-up resistors to 3.3V.
+  Their buttons connect the GPIO pin to GND when pressed.
+
+  Libraries (Arduino Library Manager): Adafruit GFX, Adafruit ST7735 and ST7789
   (WiFi, HTTPClient, Preferences come with the ESP32 board package)
   ================================================================
 */
 
-#include <Wire.h>
+#include <SPI.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
+#include <Adafruit_ST7735.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -88,15 +96,21 @@ const unsigned long LED_ON_MS      = 550;   // how long each LED stays lit
 const unsigned long LED_GAP_MS     = 200;   // dark pause between two LEDs
 const int           LED_BEEP_MS    = 150;   // beep at the start of each LED
 
-// ---------------- OLED ----------------
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// ---------------- 1.8-INCH ST7735 TFT ----------------
+// Typical ST7735 1.8-inch modules are 128x160 pixels.
+// Rotation 1 makes the display landscape (160x128).
+// CS is tied to GND; -1 tells Adafruit_GFX that no CS GPIO is used.
+// Hardware SPI is remapped with MISO disabled so GPIO19 stays available for LED 7.
+const int TFT_CS   = -1;
+const int TFT_DC   = 21;
+const int TFT_MOSI = 23;
+const int TFT_SCLK = 18;
+const int TFT_RST  = 22;
+Adafruit_ST7735 display(&SPI, TFT_CS, TFT_DC, TFT_RST);
 
 // ---------------- PINS ----------------
-const int LED_PINS[7]    = {4, 5, 13, 14, 16, 17, 18};
-const int BUTTON_PINS[7] = {19, 23, 25, 26, 27, 32, 33};
+const int LED_PINS[7]    = {4, 5, 13, 14, 16, 17, 19};
+const int BUTTON_PINS[7] = {34, 35, 25, 26, 27, 32, 33};
 const int ABANDON_BUTTON = 15;
 const unsigned long ABANDON_HOLD_MS = 2000;
 const int BUZZER_PIN     = 2;
@@ -121,7 +135,7 @@ int highestLevel = 1;
 unsigned long responseTime = 0;     // ms the whole round took (used for points)
 bool inputTimedOut = false;
 bool allLevelsCleared = false;     // true after Level 20 is completed
-int lastTimerKey = 0;               // remembers which countdown value is on the OLED
+int lastTimerKey = 0;               // remembers which countdown value is on the TFT
 int answeredInRound = 0;            // buttons the player pressed this round
 unsigned long gameStartMs = 0;
 
@@ -233,15 +247,27 @@ void setup() {
   for (int i = 0; i < 7; i++) {
     pinMode(LED_PINS[i], OUTPUT);
     digitalWrite(LED_PINS[i], LOW);
-    pinMode(BUTTON_PINS[i], INPUT_PULLUP);
+
+    // GPIO34 and GPIO35 are input-only and have no internal pull-ups.
+    // Their physical buttons must each have an external 10k pull-up to 3.3V.
+    if (BUTTON_PINS[i] == 34 || BUTTON_PINS[i] == 35) {
+      pinMode(BUTTON_PINS[i], INPUT);
+    } else {
+      pinMode(BUTTON_PINS[i], INPUT_PULLUP);
+    }
   }
   pinMode(ABANDON_BUTTON, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
 
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("OLED not found");
-  }
-  display.clearDisplay();
+  // Use GPIO18 for SCK and GPIO23 for MOSI. MISO is disabled so GPIO19
+  // can safely drive LED 7. CS is tied low on the TFT module.
+  SPI.begin(TFT_SCLK, -1, TFT_MOSI, -1);
+
+  // The exact tab option varies by ST7735 module. If the image is shifted
+  // or colors are wrong, try INITR_GREENTAB or INITR_REDTAB instead.
+  display.initR(INITR_BLACKTAB);
+  display.setRotation(1);  // landscape: 160x128
+  display.fillScreen(ST77XX_BLACK);
   showMessage("LIGHT MEMORY", "CHALLENGE");
   randomSeed(esp_random());
   delay(1500);
@@ -586,7 +612,7 @@ int waitForButtonPress(unsigned long roundStart, unsigned long limitMs, bool &ti
       return -1;
     }
     if (checkPhysicalAbandon()) return -2;
-    refreshTurnTimer(roundStart);        // OLED countdown (redraws once per second)
+    refreshTurnTimer(roundStart);        // TFT countdown (redraws once per second)
     for (int i = 0; i < 7; i++) {
       if (digitalRead(BUTTON_PINS[i]) == LOW) {
         unsigned long t = millis();
@@ -728,9 +754,9 @@ void endGame() {
 
 void showFinalScreen() {
   bool delivered = (lastOutcome == OUT_DELIVERED && queueCount() == 0);
-  display.clearDisplay();
+  display.fillScreen(ST77XX_BLACK);
   display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(ST77XX_WHITE);
   display.setCursor(0, 0);
   display.println("GAME OVER");
   display.println(currentCodename);
@@ -743,7 +769,7 @@ void showFinalScreen() {
   if (delivered) display.println("Saved to server");
   else if (lastOutcome == OUT_DISCARD) display.println("Server rejected");
   else display.println("Saved offline");
-  display.display();
+  // TFT writes are sent immediately; no display.display() call is needed.
 }
 
 // =================================================================
@@ -1140,25 +1166,25 @@ bool jsonGetLong(const char* json, const char* key, long &out) {
 }
 
 // =================================================================
-// OLED + BUZZER HELPERS
+// TFT + BUZZER HELPERS
 // =================================================================
 // Big pre-game countdown number.
 void showCountdown(long n) {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+  display.fillScreen(ST77XX_BLACK);
+  display.setTextColor(ST77XX_WHITE);
   display.setTextSize(2);
   display.setCursor(0, 0);
   display.print("GET READY!");
   display.setTextSize(4);
   display.setCursor(52, 28);
   display.print((int)n);
-  display.display();
+  // TFT writes are sent immediately; no display.display() call is needed.
 }
 
 // Live countdown while the player enters the sequence.
 void showTurn(long secs, bool grace) {
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
+  display.fillScreen(ST77XX_BLACK);
+  display.setTextColor(ST77XX_WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print("LEVEL ");
@@ -1171,7 +1197,7 @@ void showTurn(long secs, bool grace) {
   display.print(grace ? "+" : "");
   display.print((int)secs);
   display.print("s");
-  display.display();
+  // TFT writes are sent immediately; no display.display() call is needed.
 }
 
 // Seconds left in the base time; after that, seconds left in the grace period.
@@ -1197,9 +1223,9 @@ void showIdle(IdleStatus s) {
 }
 
 void showMessage(String line1, String line2) {
-  display.clearDisplay();
+  display.fillScreen(ST77XX_BLACK);
   display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
+  display.setTextColor(ST77XX_WHITE);
   display.setCursor(0, 10);
   display.println(line1);
   if (line2 != "") {
@@ -1207,7 +1233,7 @@ void showMessage(String line1, String line2) {
     display.setCursor(0, 40);
     display.println(line2);
   }
-  display.display();
+  // TFT writes are sent immediately; no display.display() call is needed.
 }
 
 // Beep by toggling the pin: works on any ESP32 board-package version and

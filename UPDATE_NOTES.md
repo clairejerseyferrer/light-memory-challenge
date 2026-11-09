@@ -99,3 +99,24 @@ Copy the changed files above into the matching paths in your current repository.
 - `/api/device/command` now returns the session UUID the physical button should target: active countdown/game first, otherwise the oldest waiting session.
 - Firmware stores that target separately from the active gameplay session and checks the physical button while idle, so it can cancel a queued session even before the game starts.
 - No new database columns or migration are required; session status remains `abandoned`.
+
+
+## TFT display and revised ESP32 pin map
+
+The firmware now targets a typical 1.8-inch ST7735 SPI TFT in landscape orientation. The display driver changed from Adafruit SSD1306 to Adafruit ST7735; game, session, Wi-Fi, backend upload, and telemetry logic were otherwise retained.
+
+| Component | ESP32 GPIO |
+|---|---|
+| LED 1–7 | 4, 5, 13, 14, 16, 17, 19 |
+| Game buttons 1–7 | 34, 35, 25, 26, 27, 32, 33 |
+| Physical abandon/reset | 15 |
+| Buzzer | 2 |
+| TFT SCK | 18 |
+| TFT MOSI / SDA | 23 |
+| TFT DC / A0 | 21 |
+| TFT RST / RES | 22 |
+| TFT CS | GND (CS=-1 in the driver) |
+
+GPIO34 and GPIO35 require separate external 10kΩ pull-up resistors to 3.3V; the corresponding buttons connect those GPIOs to GND when pressed. The firmware configures those two pins as `INPUT`, not `INPUT_PULLUP`.
+
+The TFT uses the ESP32 hardware SPI bus with SCK=18, MOSI=23, and MISO disabled. This is intentional: GPIO19 is therefore available for LED 7. This pin map assumes a classic ESP32 DevKit / ESP32-WROOM board and a 1.8-inch ST7735 128x160 module. Verify the exact TFT controller, tab initialization, voltage, and backlight requirements before wiring. The firmware has not been compiled or tested on the team's physical hardware.

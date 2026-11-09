@@ -9,7 +9,10 @@ Physical controls
 - GPIO15 is the ABANDON/RESET button. It is not a start button.
 - Hold GPIO15 for 2 seconds during countdown or gameplay to abandon the active session.
 - The player starts a queued session from the website/phone only.
-- The seven gameplay buttons remain on GPIO 19, 23, 25, 26, 27, 32, and 33.
+- The seven gameplay buttons are on GPIO 34, 35, 25, 26, 27, 32, and 33.
+- GPIO34 and GPIO35 are input-only and have no internal pull-ups. Add one external 10kΩ pull-up resistor from each pin to 3.3V; each corresponding button connects its GPIO to GND when pressed.
+- The seven LEDs are on GPIO 4, 5, 13, 14, 16, 17, and 19.
+- The 1.8-inch ST7735 SPI TFT uses SCK=GPIO18, MOSI=GPIO23, DC=GPIO21, RST=GPIO22, and CS=GND. The firmware uses hardware SPI with MISO disabled and CS=-1.
 
 Backend integration
 1. The ESP32 polls GET /api/device/command?device_id=ESP32-001.
@@ -35,7 +38,7 @@ FastAPI expands the firmware's compact JSON keys into descriptive names before a
 
 Setup
 1. Open src/LightMemoryChallenge.ino in Arduino IDE.
-2. Install Adafruit GFX and Adafruit SSD1306. WiFi, HTTPClient, Preferences, and time are supplied by the ESP32 board package.
+2. Install Adafruit GFX and Adafruit ST7735 and ST7789. WiFi, SPI, HTTPClient, Preferences, and time are supplied by the ESP32 board package.
 3. Copy src/arduino_secrets.example.h to src/arduino_secrets.h.
 4. Fill in Wi-Fi name/password, API base URL, DEVICE_ID, and DEVICE_TOKEN. Do not commit arduino_secrets.h.
 5. Set DEVICE_API_TOKEN in the backend .env to the same token and DEFAULT_DEVICE_ID to the same device ID.
@@ -61,3 +64,13 @@ PHYSICAL ABANDON BUTTON UPDATE
 - This works for the active game, countdown, and the oldest waiting session when no game is active.
 - The website remains responsible for creating and starting sessions.
 - The board polls the backend for the exact session UUID before sending an abandonment request.
+
+
+TFT DISPLAY / WIRING
+- This firmware revision replaces the I2C OLED with a 1.8-inch ST7735 SPI TFT (typical 128x160 module), rotated to landscape (160x128).
+- TFT wiring: SCK -> GPIO18; SDA/MOSI -> GPIO23; DC/A0 -> GPIO21; RST/RES -> GPIO22; CS -> GND; VCC -> 3.3V (unless the exact module documentation specifies otherwise); GND -> ESP32 GND.
+- If the TFT has a BL/LED backlight pin, follow the exact module's documentation. Many breakout boards allow BL/LED to connect to 3.3V, but verify whether the board includes a current-limiting resistor.
+- The default initialization is INITR_BLACKTAB. If the image is shifted or colors are incorrect, try INITR_GREENTAB or INITR_REDTAB in LightMemoryChallenge.ino.
+- GPIO34 and GPIO35 each need a 10kΩ external pull-up resistor to 3.3V. Do not use INPUT_PULLUP for these pins.
+- This pin map assumes a classic ESP32 DevKit / ESP32-WROOM board. Confirm the exact ESP32 variant before wiring.
+- The firmware has been edited from the repository source but has NOT been compiled or physically tested against your exact TFT module/ESP32 board. Test the display and each button before full gameplay.
