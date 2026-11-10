@@ -353,6 +353,57 @@ def device_started(payload: dict[str, str], x_device_token: str | None = Header(
     if not updated.data: raise HTTPException(409, "Session was already updated.")
     return {"session_id": sid, "status": "playing"}
 
+@app.get("/api/leaderboard")
+def leaderboard(limit: int = Query(default=100, ge=1, le=500)):
+    """Return each codename's personal best; codenames are not authenticated identities."""
+    client = db()
+    try:
+        sessions_q = (client.table("game_sessions")
+            .select("id,codename,completed_at")
+            .eq("status", "completed")
+            .execute())
+        results_q = (client.table("game_results")
+            .select("session_id,score,highest_level,accuracy,saved_at")
+            .execute())
+    except Exception:
+        raise HTTPException(500, "Could not retrieve leaderboard data.")
+
+    sessions_by_id = {row["id"]: row for row in (sessions_q.data or [])}
+    best_by_codename: dict[str, dict[str, Any]] = {}
+    for result in results_q.data or []:
+        session = sessions_by_id.get(result.get("session_id"))
+        if not session:
+            continue
+        codename = session.get("codename") or "Unknown"
+        key = codename.strip().casefold()
+        candidate = {
+            "codename": codename,
+            "session_id": result.get("session_id"),
+            "score": int(result.get("score") or 0),
+            "highest_level": int(result.get("highest_level") or 0),
+            "accuracy": float(result.get("accuracy") or 0),
+            "saved_at": result.get("saved_at"),
+        }
+        current = best_by_codename.get(key)
+        def rank_key(row):
+            # Higher level, then higher score, then earliest saved result.
+            return (-row["highest_level"], -row["score"], row["saved_at"] or "9999")
+        if current is None or rank_key(candidate) < rank_key(current):
+            best_by_codename[key] = candidate
+
+    entries = sorted(best_by_codename.values(), key=lambda row: (
+        -row["highest_level"], -row["score"], row["saved_at"] or "9999"
+    ))[:limit]
+    for index, entry in enumerate(entries, start=1):
+        entry["rank"] = index
+    return {
+        "entries": entries,
+        "count": len(entries),
+        "ranking_basis": "Highest level descending, score descending, then earliest saved result.",
+        "identity_note": "One personal-best entry per codename; codenames are not unique or authenticated identities.",
+    }
+
+
 @app.get("/api/players/search")
 def search_player(codename: str = Query(min_length=2, max_length=24)):
     codename = codename.strip()

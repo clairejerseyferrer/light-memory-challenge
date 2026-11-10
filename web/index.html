@@ -5,189 +5,31 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Light Memory Challenge</title>
     <style>
-      :root {
-        color-scheme: dark;
-        --bg: #10131b;
-        --panel: #1a2030;
-        --text: #f4f6fb;
-        --muted: #aab4c8;
-        --accent: #a5b4fc;
-        --border: #343d54;
-      }
-      * {
-        box-sizing: border-box;
-      }
-      body {
-        margin: 0;
-        min-height: 100vh;
-        padding: 18px;
-        background: radial-gradient(circle at top, #202b48, var(--bg) 55%);
-        color: var(--text);
-        font:
-          16px/1.5 system-ui,
-          sans-serif;
-      }
-      main {
-        width: min(100%, 760px);
-        margin: auto;
-      }
-      .eyebrow,
-      .label {
-        color: var(--muted);
-        font-size: 0.78rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-      .eyebrow {
-        color: var(--accent);
-        font-weight: 800;
-      }
-      h1 {
-        font-size: clamp(1.8rem, 5vw, 2.5rem);
-        line-height: 1.1;
-      }
-      .panel,
-      .card {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 17px;
-        padding: 18px;
-        margin: 12px 0;
-      }
-      .tabs {
-        display: flex;
-        gap: 8px;
-        margin: 20px 0;
-      }
-      .tab,
-      button {
-        border: 0;
-        border-radius: 11px;
-        padding: 12px 15px;
-        font: inherit;
-        font-weight: 750;
-        cursor: pointer;
-      }
-      .tab {
-        flex: 1;
-        background: #303951;
-        color: white;
-      }
-      .tab.active,
-      button.primary {
-        background: var(--accent);
-        color: #111526;
-      }
-      button.secondary {
-        background: #303951;
-        color: white;
-      }
-      button.full {
-        width: 100%;
-        margin-top: 12px;
-      }
-      button:disabled {
-        opacity: 0.5;
-      }
-      input {
-        width: 100%;
-        padding: 13px;
-        border-radius: 10px;
-        border: 1px solid var(--border);
-        background: #111724;
-        color: white;
-        font: inherit;
-      }
-      label {
-        display: block;
-        margin: 12px 0 7px;
-        font-weight: 700;
-      }
-      .hidden {
-        display: none !important;
-      }
-      .muted,
-      .message {
-        color: var(--muted);
-      }
-      .sessionid {
-        font-size: 1.4rem;
-        font-weight: 900;
-        color: var(--accent);
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-      }
-      .stat {
-        background: #111724;
-        border: 1px solid var(--border);
-        border-radius: 11px;
-        padding: 13px;
-        overflow-wrap: anywhere;
-      }
-      .stat strong {
-        display: block;
-        font-size: 1.25rem;
-      }
-      .countdown {
-        font-size: 4rem;
-        font-weight: 900;
-        text-align: center;
-      }
-      .pill {
-        border-radius: 99px;
-        background: #303951;
-        padding: 4px 8px;
-        font-size: 0.8rem;
-      }
-      .level-chart { display: grid; gap: 12px; margin: 14px 0; }
-      .level-card { background: #111724; border: 1px solid var(--border); border-radius: 13px; padding: 13px; min-width: 0; }
-      .level-top { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; }
-      .level-name { font-weight:850; }
-      .metric-line { display:grid; grid-template-columns: minmax(88px, 112px) 1fr auto; gap:8px; align-items:center; margin:9px 0; font-size:.88rem; }
-      .bar-track { height:11px; background:#303951; border-radius:99px; overflow:hidden; min-width:0; }
-      .bar-fill { height:100%; background:var(--accent); border-radius:99px; }
-      .bar-fill.time { background:#7dd3fc; }
-      .level-meta { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-top:12px; }
-      .mini-stat { background:#1b2435; border-radius:9px; padding:8px; min-width:0; }
-      .mini-stat strong { display:block; font-size:1rem; overflow-wrap:anywhere; }
-      .details { margin-top:10px; font-size:.84rem; color:var(--muted); overflow-wrap:anywhere; }
-      .details summary { cursor:pointer; color:var(--accent); font-weight:700; }
-      .confidence { font-size:.76rem; color:var(--muted); }
-      .section-heading { margin: 22px 0 8px; }
-      .recommendation {
-        padding: 10px;
-        border-left: 3px solid var(--accent);
-        background: #111724;
-        margin: 8px 0;
-      }
-      .small {
-        font-size: 0.82rem;
-      }
-      @media (max-width: 480px) {
-        .tabs {
-          flex-direction: column;
-        }
-        .grid {
-          grid-template-columns: 1fr;
-        }
-      }
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Rye&display=swap');
+      :root{color-scheme:light;--cream:#fff6d7;--paper:#fff9e8;--red:#bd101d;--red2:#e51d2a;--wine:#85002d;--gold:#f5bd19;--ink:#4d1026;--muted:#876b61;--line:#e8c98b;--green:#23734d;--shadow:0 12px 30px #5c1b2818}
+      *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% -15%,#fff 0,#fff6d7 58%,#f4dfb2 100%);color:var(--ink);font:15px/1.55 'DM Sans',system-ui,sans-serif;padding:0 0 86px}
+      button,input{font:inherit}button{border:0;border-radius:12px;padding:12px 16px;font-weight:800;cursor:pointer;transition:transform .15s,filter .15s}button:hover{filter:brightness(1.04);transform:translateY(-1px)}button:disabled{opacity:.5;cursor:not-allowed;transform:none}.primary{background:var(--wine);color:#fff}.secondary{background:#f5e4b6;color:var(--wine);border:1px solid var(--line)}.full{width:100%;margin-top:12px}
+      .shell{width:min(100% - 28px,1050px);margin:auto}.masthead{background:linear-gradient(110deg,#a9001f,#d71926 48%,#a9001f);color:#fff;border-bottom:5px solid var(--gold);box-shadow:0 4px 18px #61001c30}.mast-inner{padding:22px 0 18px;text-align:center}.brand-kicker{font-size:.72rem;letter-spacing:.2em;text-transform:uppercase;color:#ffe89b;font-weight:800}.brand{font:clamp(1.7rem,5vw,2.8rem)/1.08 'Rye',Georgia,serif;text-shadow:2px 3px 0 #67001c;margin:7px 0}.brand-sub{margin:0;color:#ffeec5;font-size:.9rem}.marquee{height:8px;background:radial-gradient(circle,#ffdf38 2px,transparent 3px) 0 0/18px 8px repeat-x}
+      .nav{display:flex;gap:8px;padding:14px 0;overflow-x:auto;scrollbar-width:none}.nav::-webkit-scrollbar{display:none}.tab{flex:1;min-width:max-content;background:#fff9e8;color:var(--wine);border:1px solid var(--line);box-shadow:0 3px 8px #6a2b1910}.tab.active{background:var(--gold);color:#4b1024;border-color:#d69a00}
+      main{padding-top:4px}.hero{position:relative;overflow:hidden;background:linear-gradient(135deg,#fff8df,#ffeab0);border:2px solid #d9a52b;border-radius:24px;padding:28px 22px;margin:8px 0 18px;box-shadow:var(--shadow)}.hero:after{content:'✦  ♫  ✦';position:absolute;right:18px;bottom:8px;color:#e8b51b;font-size:2rem;opacity:.55}.eyebrow,.label{color:#9c5b3e;font-size:.75rem;letter-spacing:.09em;text-transform:uppercase;font-weight:800}.hero h1,.display-title{font:clamp(1.7rem,5vw,2.5rem)/1.12 'Rye',Georgia,serif;color:var(--wine);margin:8px 0}.hero p{max-width:650px;color:#704b40}.hero-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}.hero-actions button{min-width:145px}
+      .panel,.card{background:var(--paper);border:1px solid var(--line);border-radius:18px;padding:18px;margin:12px 0;box-shadow:var(--shadow)}h2,h3{color:var(--wine);line-height:1.2}h2{font-size:1.35rem;margin:0 0 8px}.muted,.message{color:var(--muted)}.small{font-size:.82rem}.hidden{display:none!important}.section-intro{margin:0 0 15px;color:var(--muted)}
+      .feature-grid,.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.feature{background:#fffdf4;border:1px solid var(--line);border-radius:15px;padding:15px}.feature .symbol{font-size:1.5rem}.feature h3{margin:5px 0}.step-list{display:grid;gap:10px}.step{display:flex;gap:12px;align-items:flex-start}.step-num{flex:0 0 30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--red);color:#fff;font-weight:900}
+      label{display:block;margin:12px 0 7px;font-weight:800}input{width:100%;padding:13px;border-radius:11px;border:1px solid #d9bd8b;background:#fffdf6;color:var(--ink);outline-color:var(--red)}input:focus{outline:2px solid #e8a63a;outline-offset:1px}.sessionid{font-size:1.4rem;font-weight:900;color:var(--wine);overflow-wrap:anywhere}.stat{background:#fffdf4;border:1px solid var(--line);border-radius:13px;padding:13px;overflow-wrap:anywhere}.stat strong{display:block;font-size:1.25rem;color:var(--wine)}.countdown{font-size:4rem;font-weight:900;text-align:center;color:var(--red)}.pill{display:inline-block;border-radius:99px;background:#f7e6b8;padding:4px 9px;font-size:.78rem;font-weight:800;color:#773047}.status-strip{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.dot{width:9px;height:9px;border-radius:50%;display:inline-block;background:#d69a00}.dot.good{background:#27945e}.dot.unknown{background:#c18a16}
+      .level-chart{display:grid;gap:12px;margin:14px 0}.level-card{background:#fffdf4;border:1px solid var(--line);border-radius:13px;padding:13px;min-width:0}.level-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.level-name{font-weight:850}.metric-line{display:grid;grid-template-columns:minmax(88px,112px) 1fr auto;gap:8px;align-items:center;margin:9px 0;font-size:.88rem}.bar-track{height:11px;background:#f0dfb9;border-radius:99px;overflow:hidden;min-width:0}.bar-fill{height:100%;background:var(--red);border-radius:99px}.bar-fill.time{background:#d89b1c}.level-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.mini-stat{background:#f9edcf;border-radius:9px;padding:8px;min-width:0}.mini-stat strong{display:block;font-size:1rem;overflow-wrap:anywhere}.details{margin-top:10px;font-size:.84rem;color:var(--muted);overflow-wrap:anywhere}.details summary{cursor:pointer;color:var(--wine);font-weight:700}.section-heading{margin:22px 0 8px}.recommendation{padding:11px;border-left:3px solid var(--gold);background:#fff2c9;margin:8px 0;border-radius:0 10px 10px 0}
+      .podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:end;margin:22px 0 18px}.podium-item{text-align:center;background:linear-gradient(#fff9eb,#f1e4d3);border:1px solid #c9c9c9;border-radius:14px 14px 8px 8px;padding:12px 6px 16px;min-width:0;box-shadow:0 5px 0 #d2c5b4}.podium-item.first{padding-top:25px;padding-bottom:26px;background:linear-gradient(#fff0a8,#f6ce4c);border:2px solid #dca500;box-shadow:0 7px 0 #bd8700}.podium-item.third{background:linear-gradient(#f8dfc8,#d6a078);border-color:#b8784d;box-shadow:0 5px 0 #a86b45}.podium-rank{font:1.5rem 'Rye',serif;color:var(--wine)}.podium-score{font-weight:900;color:var(--wine)}.podium-name{display:block;overflow-wrap:anywhere;font-weight:850}.podium-base{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:#79513e;margin-top:7px}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:570px}th,td{text-align:left;padding:10px;border-bottom:1px solid #ead8b2}th{font-size:.76rem;text-transform:uppercase;color:#966044}
+      .analysis-modal{position:fixed;inset:0;z-index:50;background:#2c071dcc;display:grid;place-items:center;padding:14px}.analysis-dialog{width:min(100%,850px);max-height:92vh;overflow:auto;background:var(--cream);border:3px solid var(--gold);border-radius:20px;padding:16px;box-shadow:0 20px 70px #21000c80}.analysis-dialog-head{position:sticky;top:-16px;z-index:2;background:var(--cream);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0 12px;border-bottom:1px solid var(--line)}.analysis-dialog-head h2{margin:0}.analysis-close{background:var(--wine);color:white;padding:9px 13px}.analysis-modal .card{box-shadow:none;margin:12px 0}.analysis-modal .section-heading{margin-top:18px}
+      .bottom-nav{display:none}.footer{text-align:center;color:#9c7868;padding:24px 8px 12px;font-size:.78rem}
+      @media(max-width:620px){body{padding-bottom:78px}.analysis-modal{padding:7px}.analysis-dialog{max-height:96vh;padding:12px;border-radius:15px}.analysis-dialog-head{top:-12px}.podium{gap:6px}.podium-item{padding:10px 4px 13px}.podium-item.first{padding-top:20px;padding-bottom:22px}.podium-name{font-size:.78rem}.shell{width:min(100% - 20px,1050px)}.mast-inner{padding:17px 0 14px}.nav{display:none}.feature-grid,.grid{grid-template-columns:1fr 1fr}.panel,.card{padding:15px}.hero{padding:23px 17px}.metric-line{grid-template-columns:92px 1fr auto;font-size:.78rem}.bottom-nav{position:fixed;z-index:20;bottom:0;left:0;right:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px max(8px,env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom));background:#fff9e8;border-top:2px solid var(--gold);box-shadow:0 -5px 18px #57172a18}.bottom-nav .tab{min-width:0;padding:9px 3px;font-size:.72rem;border-radius:10px}.bottom-nav .tab span{display:block;font-size:1.1rem}.podium-item{font-size:.8rem}.podium-score{font-size:.9rem}}
+      @media(max-width:370px){.feature-grid,.grid{grid-template-columns:1fr}.metric-line{grid-template-columns:82px 1fr auto}.podium{gap:5px}}
     </style>
   </head>
   <body>
-    <main>
-      <div class="eyebrow">IoT Laboratory Game</div>
-      <h1>Light Memory Challenge</h1>
-      <p class="muted">
-        Create a session from your phone, then start it when your turn arrives. The board button is reserved for abandoning/resetting an active session.
-      </p>
-      <nav class="tabs">
-        <button class="tab active" id="tabStart">Start a Game</button
-        ><button class="tab" id="tabSearch">Find My Sessions</button>
-      </nav>
-      <section class="panel" id="startView">
+    <header class="masthead"><div class="shell mast-inner"><div class="brand-kicker">Welcome to the greatest memory show</div><div class="brand">Light Memory Challenge</div><p class="brand-sub">A carnival of lights, patterns, and quick thinking</p></div><div class="marquee"></div></header>
+    <main class="shell">
+      <nav class="nav" aria-label="Main navigation"><button class="tab active" id="tabHome" onclick="tab('home')">Home</button><button class="tab" id="tabStart" onclick="tab('start')">Play</button><button class="tab" id="tabLeaderboard" onclick="tab('leaderboard')">Leaderboard</button><button class="tab" id="tabSearch" onclick="tab('search')">Session History</button></nav>
+      <section id="homeView"><div class="hero"><div class="eyebrow">Step right up!</div><h1 class="display-title">Remember the lights.<br>Beat the challenge.</h1><p>Watch the illuminated sequence, repeat it using the physical buttons, and see how far your memory can take you. Every level brings a new test.</p><div class="hero-actions"><button class="primary" onclick="tab('start')">Start a Game</button><button class="secondary" onclick="tab('search')">Find My Sessions</button></div></div><div class="panel"><h2>How to Play</h2><div class="step-list"><div class="step"><span class="step-num">1</span><div><strong>Watch the sequence</strong><div class="muted small">Pay attention as the board lights up in a specific order.</div></div></div><div class="step"><span class="step-num">2</span><div><strong>Repeat the pattern</strong><div class="muted small">Press the matching physical buttons in the same order.</div></div></div><div class="step"><span class="step-num">3</span><div><strong>Climb the levels</strong><div class="muted small">Sequences become more challenging as you progress. You have three lives.</div></div></div><div class="step"><span class="step-num">4</span><div><strong>Review your performance</strong><div class="muted small">After the game, check your score, accuracy, and Intelligent System feedback.</div></div></div></div></div><div class="feature-grid"><article class="feature"><div class="symbol">🎪</div><h3>One game at a time</h3><p class="small muted">Players take turns on the physical board through a FIFO queue.</p></article><article class="feature"><div class="symbol">❤️</div><h3>Three lives</h3><p class="small muted">Mistakes cost lives. Stay focused and keep your sequence accurate.</p></article><article class="feature"><div class="symbol">🏆</div><h3>Earn your score</h3><p class="small muted">Your score reflects how successfully and quickly you complete sequences.</p></article><article class="feature"><div class="symbol">🧠</div><h3>Learn your strengths</h3><p class="small muted">Performance analysis summarizes accuracy, response time, and areas to improve.</p></article></div><div class="panel"><h2>Game device status</h2><div class="status-strip"><span class="dot unknown"></span><strong id="deviceStatus">Checking backend…</strong><span class="pill" id="apiStatus">API status</span></div><p class="small muted" id="deviceStatusNote">Backend availability does not confirm that the physical ESP32 is online.</p></div></section>
+      <section id="leaderboardView" class="hidden"><div class="panel"><h2>Hall of Fame</h2><p class="section-intro">Personal best per codename, ranked by highest level, then score, then earliest saved result. Codenames are not verified player identities.</p><label for="leaderboardSearch">Find a player</label><input id="leaderboardSearch" placeholder="Search leaderboard…"/><div id="leaderboardContent"><p class="muted">Loading leaderboard…</p></div></div></section>
+      <section class="panel hidden" id="startView">
         <h2>New session</h2>
         <p class="muted">Create a readable session ID using your codename.</p>
         <form id="createForm">
@@ -223,9 +65,9 @@
         </div>
       </section>
       <section class="panel hidden" id="searchView">
-        <h2>Find My Sessions</h2>
+        <h2>Session History</h2>
         <p class="muted">
-          Search for an exact codename. Search is case-insensitive.
+          Find previous sessions by codename. Search is case-insensitive; the same codename may belong to different players.
         </p>
         <form id="searchForm">
           <label for="searchCodename">Codename</label
@@ -240,13 +82,12 @@
         </form>
         <p id="searchMessage" class="message"></p>
         <div id="sessionList"></div>
-        <div id="performanceView" class="hidden"></div>
       </section>
-      <p class="small muted">
-        Use a codename, not your real name. This prototype lets anyone who knows
-        a codename search its sessions.
-      </p>
+      <p class="small muted">Use a codename, not your real name. Anyone who knows a codename may be able to find its sessions; codenames are not unique.</p>
+      <div class="footer">Made for curious minds and carnival champions · Light Memory Challenge</div>
     </main>
+    <div id="analysisModal" class="analysis-modal hidden" role="dialog" aria-modal="true" aria-labelledby="analysisTitle"><div class="analysis-dialog"><div class="analysis-dialog-head"><h2 id="analysisTitle">Performance Analysis</h2><button class="analysis-close" id="closeAnalysis" type="button" aria-label="Close performance analysis">✕ Close</button></div><div id="performanceView"><p class="muted">Select a completed session to view its analysis.</p></div></div></div>
+    <nav class="bottom-nav" aria-label="Mobile navigation"><button class="tab active" id="mobileHome" onclick="tab('home')"><span>⌂</span>Home</button><button class="tab" id="mobilePlay" onclick="tab('start')"><span>🎟</span>Play</button><button class="tab" id="mobileLeaderboard" onclick="tab('leaderboard')"><span>🏆</span>Ranks</button><button class="tab" id="mobileHistory" onclick="tab('search')"><span>📜</span>History</button></nav>
     <script>
       const $ = (id) => document.getElementById(id);
       const STORAGE_KEY = "lmc_active_session_id";
@@ -281,14 +122,13 @@
         countdownTarget = null;
       }
       function tab(which) {
-        const start = which === "start";
-        $("startView").classList.toggle("hidden", !start);
-        $("searchView").classList.toggle("hidden", start);
-        $("tabStart").classList.toggle("active", start);
-        $("tabSearch").classList.toggle("active", !start);
+        const views = {home:"homeView", start:"startView", leaderboard:"leaderboardView", search:"searchView"};
+        for (const [key,id] of Object.entries(views)) $(id).classList.toggle("hidden", key !== which);
+        for (const id of ["tabHome","tabStart","tabLeaderboard","tabSearch","mobileHome","mobilePlay","mobileLeaderboard","mobileHistory"]) if ($(id)) $(id).classList.remove("active");
+        const activeIds = {home:["tabHome","mobileHome"],start:["tabStart","mobilePlay"],leaderboard:["tabLeaderboard","mobileLeaderboard"],search:["tabSearch","mobileHistory"]};
+        for (const id of activeIds[which] || []) if ($(id)) $(id).classList.add("active");
+        if (which === "leaderboard") loadLeaderboard();
       }
-      $("tabStart").onclick = () => tab("start");
-      $("tabSearch").onclick = () => tab("search");
 
       async function checkExistingCodename() {
         const name = $("codename").value.trim();
@@ -496,7 +336,6 @@
         $("finalResults").innerHTML =
           `<h2>Game Results</h2><div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><button class="secondary full" id="resultAnalysis">View Performance Analysis</button>`;
         $("resultAnalysis").onclick = () => {
-          tab("search");
           showPerformance(s);
         };
       }
@@ -506,7 +345,6 @@
         $("searchButton").disabled = true;
         $("searchMessage").textContent = "Searching…";
         $("sessionList").innerHTML = "";
-        $("performanceView").classList.add("hidden");
         try {
           const d = await api(
             `/api/players/search?codename=${encodeURIComponent($("searchCodename").value.trim())}`,
@@ -528,7 +366,7 @@
         }
       };
       async function loadPerformance(id) {
-        $("performanceView").classList.remove("hidden");
+        openAnalysisModal();
         $("performanceView").innerHTML = "<p>Loading performance…</p>";
         try {
           showPerformance(await api(`/api/sessions/${id}`));
@@ -536,9 +374,21 @@
           $("performanceView").textContent = err.message;
         }
       }
+      function openAnalysisModal() {
+        $("analysisModal").classList.remove("hidden");
+        document.body.style.overflow = "hidden";
+        $("closeAnalysis").focus();
+      }
+      function closeAnalysisModal() {
+        $("analysisModal").classList.add("hidden");
+        document.body.style.overflow = "";
+      }
+      $("closeAnalysis").addEventListener("click", closeAnalysisModal);
+      $("analysisModal").addEventListener("click", (event) => { if (event.target === $("analysisModal")) closeAnalysisModal(); });
+      document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("analysisModal").classList.contains("hidden")) closeAnalysisModal(); });
       function showPerformance(s) {
+        openAnalysisModal();
         const el = $("performanceView");
-        el.classList.remove("hidden");
         const r = s.result;
         if (!r) {
           el.innerHTML = `<div class="card"><h2>${esc(s.display_id)}</h2><p>This session is ${esc(s.status)}. Results will appear after the game is completed.</p></div>`;
@@ -608,6 +458,7 @@
           const saved = localStorage.getItem(STORAGE_KEY);
           if (!saved) return;
           sid = saved;
+          tab("start");
           const s = await api(`/api/sessions/${sid}`);
           renderSession(s);
           if (s.status === "completed" || s.status === "abandoned") {
@@ -619,6 +470,31 @@
           localStorage.removeItem(STORAGE_KEY);
         }
       }
+      let leaderboardRows = [];
+      async function loadLeaderboard() {
+        const target = $("leaderboardContent");
+        target.innerHTML = '<p class="muted">Loading leaderboard…</p>';
+        try {
+          const d = await api('/api/leaderboard?limit=100');
+          leaderboardRows = d.entries || [];
+          renderLeaderboard();
+        } catch (err) { target.innerHTML = `<p class="message">Leaderboard unavailable: ${esc(err.message)}</p>`; }
+      }
+      function renderLeaderboard() {
+        const q = ($("leaderboardSearch")?.value || '').trim().toLowerCase();
+        const rows = leaderboardRows.filter(x => String(x.codename || '').toLowerCase().includes(q));
+        if (!rows.length) { $("leaderboardContent").innerHTML = '<p class="muted">No completed results found yet.</p>'; return; }
+        const top = rows.slice(0,3);
+        const podiumOrder = top.length >= 3 ? [{x:top[1],rank:2,medal:'🥈',place:'second'},{x:top[0],rank:1,medal:'🥇',place:'first'},{x:top[2],rank:3,medal:'🥉',place:'third'}] : top.map((x,i)=>({x,rank:i+1,medal:['🥇','🥈','🥉'][i],place:i===0?'first':i===1?'second':'third'}));
+        const podium = top.length ? `<div class="podium" aria-label="Top three leaderboard podium">${podiumOrder.map(({x,rank,medal,place})=>`<div class="podium-item ${place}"><div class="podium-rank">${medal}</div><span class="podium-name">${esc(x.codename)}</span><div class="podium-score">${Number(x.score).toLocaleString()} pts</div><div class="small muted">Level ${esc(x.highest_level)}</div><div class="podium-base">${rank}${rank===1?'st':rank===2?'nd':'rd'} Place</div></div>`).join('')}</div>` : '';
+        $("leaderboardContent").innerHTML = podium + `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Player</th><th>Level</th><th>Score</th><th>Accuracy</th><th>Date</th></tr></thead><tbody>${rows.map((x,i)=>`<tr><td>#${esc(x.rank ?? (i+1))}</td><td>${esc(x.codename)}</td><td>${esc(x.highest_level)}</td><td>${Number(x.score).toLocaleString()}</td><td>${Number(x.accuracy).toFixed(1)}%</td><td>${esc(x.saved_at ? new Date(x.saved_at).toLocaleDateString() : '—')}</td></tr>`).join('')}</tbody></table></div>`;
+      }
+      $("leaderboardSearch").addEventListener('input', renderLeaderboard);
+      async function checkApiStatus() {
+        try { const h = await api('/api/health'); $("deviceStatus").textContent = 'Backend reachable'; $("apiStatus").textContent = h.supabase_configured ? 'Database configured' : 'Database not configured'; $("deviceStatusNote").textContent = 'The API is responding. Physical ESP32 connectivity cannot currently be confirmed because this firmware/backend version does not expose a device heartbeat.'; }
+        catch (e) { $("deviceStatus").textContent = 'Backend unavailable'; $("apiStatus").textContent = 'Connection error'; $("deviceStatusNote").textContent = e.message; }
+      }
+      checkApiStatus();
       restoreSavedSession();
     </script>
   </body>
