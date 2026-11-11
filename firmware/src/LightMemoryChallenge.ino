@@ -58,6 +58,7 @@
 #include <Preferences.h>
 #include <time.h>
 #include "arduino_secrets.h"
+#include "AdaptiveTiming.h"   // original level timing + bounded adaptive adjustment (PC-tested)
 
 // =================================================================
 // SETTINGS YOU MUST EDIT
@@ -80,13 +81,8 @@ const char* DEVICE_TOKEN  = SECRET_DEVICE_TOKEN;
 //   Not finished by T(L) + Grace -> 0 points and a lost life.
 // =================================================================
 const int           MAX_LEVEL           = 20;
-const int           BASE_POINTS         = 100;
-const int           FAST_LIMIT_SECONDS  = 10;     // 10 s or longer = no deduction
-const int           FAST_PENALTY        = 10;     // points lost per second under the limit
-const unsigned long BASE_TIME_MS        = 15000;  // T0   initial time limit
-const unsigned long TIME_PER_LEVEL_MS   = 1000;   // k    extra time per level
-const unsigned long MAX_BASE_TIME_MS    = 30000;  // Tmax
-const unsigned long GRACE_MS            = 5000;   // Grace
+// BASE_TIME_MS / TIME_PER_LEVEL_MS / MAX_BASE_TIME_MS / GRACE_MS and
+// baseTimeForLevel() now live in AdaptiveTiming.h (values unchanged).
 
 // =================================================================
 // LED PLAYBACK SPEED  (tune after prototype testing)
@@ -128,6 +124,12 @@ int score = 0;
 int lives = 3;
 int level = 1;
 int sequenceLength = 3;
+// ---- Adaptive response time (the ONLY adaptive parameter) ----
+// Signed offset added to the original level-based time. 0 = original behaviour.
+// Sequence length is never adaptive: it is only changed by advanceAfterSuccess().
+long adaptiveAdjustmentMs = 0;
+int  lastAdaptiveLevelHandled = 0;   // one adaptive request per completed level
+enum AdaptiveResult { ADAPT_OK, ADAPT_UNAVAILABLE, ADAPT_REJECTED };
 int mistakes = 0;
 int totalRounds = 0;
 int correctRounds = 0;
@@ -192,7 +194,6 @@ int lastRank = -1;
 IdleStatus idleShown = IDLE_NONE;
 
 // ---------------- FUNCTION PROTOTYPES ----------------
-unsigned long baseTimeForLevel(int lvl);
 int calcPoints(int lvl, unsigned long respMs);
 void resetGame();
 void playSession();
@@ -237,6 +238,8 @@ uint8_t queueCount();
 bool flushQueue(int attempts);
 bool jsonGetString(const char* json, const char* key, char* out, size_t n);
 bool jsonGetLong(const char* json, const char* key, long &out);
+AdaptiveResult requestAdaptiveDecision(long &recommendedAdjustmentMs);
+void reportAdaptiveApplied(int completedLevel, bool applied);
 
 // =================================================================
 // INITIALIZE
@@ -389,6 +392,8 @@ void resetGame() {
   lives = 3;
   level = 1;
   sequenceLength = 3;
+  adaptiveAdjustmentMs = 0;          // every game starts with the original timing
+  lastAdaptiveLevelHandled = 0;
   mistakes = 0;
   totalRounds = 0;
   correctRounds = 0;
@@ -523,21 +528,12 @@ bool runCountdown() {
 // =================================================================
 // FORMULAS (time per level and points)
 // =================================================================
-unsigned long baseTimeForLevel(int lvl) {
-  unsigned long t = BASE_TIME_MS + TIME_PER_LEVEL_MS * (unsigned long)(lvl - 1);
-  if (t > MAX_BASE_TIME_MS) t = MAX_BASE_TIME_MS;
-  return t;
-}
+// baseTimeForLevel() (original level-based time) is defined in AdaptiveTiming.h.
+// The time actually allowed = baseTimeForLevel(level) + bounded adaptive adjustment + GRACE_MS.
 
-// Revised scoring: 100 points, minus 10 for every whole second under 10 s.
-// (completion time is counted in whole seconds: 8.9 s counts as 8 s)
+// Full points for a quick response, then linear decay to zero at the level deadline.
 int calcPoints(int lvl, unsigned long respMs) {
-  if (respMs > baseTimeForLevel(lvl) + GRACE_MS) return 0;   // out of time
-
-  int secs = (int)(respMs / 1000UL);
-  if (secs >= FAST_LIMIT_SECONDS) return BASE_POINTS;
-  int pts = BASE_POINTS - FAST_PENALTY * (FAST_LIMIT_SECONDS - secs);
-  return pts < 0 ? 0 : pts;
+  return scoreForResponseTime(lvl, respMs, adaptiveAdjustmentMs);
 }
 
 // =================================================================
@@ -572,7 +568,7 @@ bool displaySequenceUsingLEDs() {
 bool getPlayerInput() {
   lastTimerKey = 0;                    // forces the countdown screen to draw
 
-  unsigned long limitMs = baseTimeForLevel(level) + GRACE_MS;
+  unsigned long limitMs = responseLimitForLevel(level, adaptiveAdjustmentMs);
   unsigned long startTime = millis();
   unsigned long waitStart = startTime;
   bool timedOut = false;
@@ -686,6 +682,63 @@ void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
   if (responseTime > st.slowestResponseMs)
     st.slowestResponseMs = (uint32_t)responseTime;
 }
+// Ask the backend how the response-time allowance should change for the NEXT level.
+// The backend only ever returns a bounded time adjustment; it has no say over
+// sequence length, level, LED timing or scoring. Any problem -> no change.
+AdaptiveResult requestAdaptiveDecision(long &recommendedAdjustmentMs) {
+  recommendedAdjustmentMs = adaptiveAdjustmentMs;                   // default: keep current
+  if (WiFi.status() != WL_CONNECTED || !currentSessionId[0]) return ADAPT_UNAVAILABLE;
+  LevelStats &st = levelStats[level];
+  if (!st.attempted) return ADAPT_UNAVAILABLE;
+  if (level == lastAdaptiveLevelHandled) return ADAPT_UNAVAILABLE;   // never ask twice for a level
+  lastAdaptiveLevelHandled = level;
+
+  char body[640];
+  snprintf(body, sizeof(body),
+    "{\"device_id\":\"%s\",\"session_id\":\"%s\","
+    "\"completed_level\":%d,\"sequences_attempted\":%u,"
+    "\"correct_sequences\":%u,\"mistakes\":%u,"
+    "\"sequence_length\":%u,\"avg_response_time_ms\":%.1f,"
+    "\"incorrect_press_count\":%u,"
+    "\"current_response_time_adjustment_ms\":%ld,"
+    "\"current_response_time_allowance_ms\":%lu,"
+    "\"next_level_baseline_allowance_ms\":%lu}",
+    DEVICE_ID, currentSessionId, level, st.attempted, st.correct, st.mistakes,
+    st.sequenceLength, st.responseSamples ? (float)st.responseTotalMs / st.responseSamples : 0.0f,
+    st.incorrectPresses, adaptiveAdjustmentMs,
+    responseLimitForLevel(level, adaptiveAdjustmentMs),
+    baseTimeForLevel(level + 1) + GRACE_MS);
+
+  String response;
+  int code = httpRequest("POST", "/api/device/adaptive-decision", body, &response);
+  Serial.printf("adaptive decision -> %d: %s\n", code, response.c_str());
+  if (code <= 0) return ADAPT_UNAVAILABLE;       // no HTTP reply at all (offline / timeout)
+  if (!isSuccess(code)) return ADAPT_REJECTED;
+
+  long newAdjustment = 0;
+  if (!jsonGetLong(response.c_str(), "new_response_time_adjustment_ms", newAdjustment) ||
+      !adaptiveAdjustmentIsValid(newAdjustment)) {
+    Serial.println("Invalid adaptive response; keeping current response-time setting.");
+    return ADAPT_REJECTED;
+  }
+  recommendedAdjustmentMs = newAdjustment;
+  return ADAPT_OK;
+}
+
+// Tell the backend what the board ACTUALLY uses for the next level (called after
+// level / sequenceLength have advanced). Failure here never affects gameplay.
+void reportAdaptiveApplied(int completedLevel, bool applied) {
+  char ack[320];
+  snprintf(ack, sizeof(ack),
+    "{\"device_id\":\"%s\",\"session_id\":\"%s\",\"completed_level\":%d,\"applied\":%s,"
+    "\"actual_sequence_length\":%d,\"actual_response_time_adjustment_ms\":%ld,"
+    "\"actual_response_time_allowance_ms\":%lu}",
+    DEVICE_ID, currentSessionId, completedLevel, applied ? "true" : "false",
+    sequenceLength, adaptiveAdjustmentMs, responseLimitForLevel(level, adaptiveAdjustmentMs));
+  String ignored;
+  httpRequest("POST", "/api/device/adaptive-applied", ack, &ignored);
+}
+
 void updateOnCorrect() {
   correctRounds++;
   int points = calcPoints(level, responseTime);
@@ -695,8 +748,21 @@ void updateOnCorrect() {
   if (level >= MAX_LEVEL) {
     allLevelsCleared = true;
   } else {
-    level++;
-    sequenceLength++;
+    int completedLevel = level;
+    long decisionAdjustment = adaptiveAdjustmentMs;
+    AdaptiveResult ar = requestAdaptiveDecision(decisionAdjustment);   // may fail: that is fine
+
+    // ORIGINAL PROGRESSION: level +1 and exactly ONE more button, whatever the
+    // backend said (or didn't say). Only the time adjustment can change.
+    LevelProgress progress = { level, sequenceLength, adaptiveAdjustmentMs };
+    advanceAfterSuccess(progress, MAX_LEVEL, ar == ADAPT_OK, decisionAdjustment);
+    level = progress.level;
+    sequenceLength = progress.sequenceLength;
+    adaptiveAdjustmentMs = progress.adjustmentMs;
+
+    if (ar != ADAPT_UNAVAILABLE) reportAdaptiveApplied(completedLevel, ar == ADAPT_OK);
+    Serial.printf("Next level %d: sequence %d, response limit %lu ms (adjustment %ld ms)\n",
+      level, sequenceLength, responseLimitForLevel(level, adaptiveAdjustmentMs), adaptiveAdjustmentMs);
   }
 
   playTone(1200, 200);
@@ -1203,7 +1269,7 @@ void showTurn(long secs, bool grace) {
 // Seconds left in the base time; after that, seconds left in the grace period.
 void refreshTurnTimer(unsigned long roundStart) {
   unsigned long elapsed = millis() - roundStart;
-  unsigned long base = baseTimeForLevel(level);
+  unsigned long base = adaptedBaseTimeForLevel(level, adaptiveAdjustmentMs);
   bool grace = elapsed >= base;
   unsigned long leftMs = grace ? (base + GRACE_MS - elapsed) : (base - elapsed);
   long secs = (long)((leftMs + 999UL) / 1000UL);

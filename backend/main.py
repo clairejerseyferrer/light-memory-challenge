@@ -10,6 +10,8 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client, create_client
 from .intelligent_system import analyze_performance
+from .adaptive_service import (AdaptiveError, process_adaptive_decision,
+                               record_adaptive_applied, summarize_adaptive_history)
 
 load_dotenv()
 ROOT = Path(__file__).resolve().parent
@@ -100,6 +102,23 @@ class CreateSession(BaseModel):
         if not all(ch.isalnum() or ch in " _-" for ch in value):
             raise ValueError("Use letters, numbers, spaces, hyphens, or underscores only.")
         return value
+
+class AdaptiveTelemetry(BaseModel):
+    """Completed-level statistics. There is deliberately no sequence-length input
+    to adapt: sequence length follows the original fixed progression."""
+    device_id: str = Field(min_length=1, max_length=64)
+    session_id: UUID
+    completed_level: int = Field(ge=1, le=19)   # the last level has no "next level"
+    sequences_attempted: int = Field(ge=1, le=100)
+    correct_sequences: int = Field(ge=0, le=100)
+    mistakes: int = Field(ge=0, le=100)
+    sequence_length: int = Field(ge=2, le=30)   # completed level's length (level 20 = 22 buttons)
+    avg_response_time_ms: float | None = Field(default=None, ge=0, le=120000)
+    incorrect_press_count: int = Field(default=0, ge=0, le=1000)
+    current_response_time_adjustment_ms: int = Field(default=0, ge=-4000, le=10000)
+    current_response_time_allowance_ms: int = Field(ge=1000, le=120000)
+    next_level_baseline_allowance_ms: int = Field(ge=15000, le=45000)
+
 
 class DeviceAbandon(BaseModel):
     device_id: str = Field(min_length=1, max_length=64)
@@ -241,6 +260,26 @@ def abandon_session(session_id: UUID):
         "status": "abandoned",
         **queue_state(client, session["device_id"], sid),
     }
+
+
+@app.post("/api/device/adaptive-decision")
+def device_adaptive_decision(payload: AdaptiveTelemetry, x_device_token: str | None = Header(default=None)):
+    """Authenticated, idempotent per-level response-time decision for the physical board."""
+    require_device_token(x_device_token)
+    try:
+        return process_adaptive_decision(db(), payload.model_dump(mode="json"))
+    except AdaptiveError as exc:
+        raise HTTPException(exc.status, exc.detail)
+
+
+@app.post("/api/device/adaptive-applied")
+def device_adaptive_applied(payload: dict[str, Any], x_device_token: str | None = Header(default=None)):
+    """The board reports the settings it ACTUALLY uses for the next level."""
+    require_device_token(x_device_token)
+    try:
+        return record_adaptive_applied(db(), payload)
+    except AdaptiveError as exc:
+        raise HTTPException(exc.status, exc.detail)
 
 
 @app.post("/api/device/abandon")
@@ -539,6 +578,15 @@ def save_results(session_id: UUID, payload: GameResult):
         payload.round_data,
         highest_level=payload.highest_level,
     )
+    # Attach the decisions and confirmed hardware settings to the final report.
+    try:
+        adaptive_q = (client.table("game_adaptive_events").select("*")
+                      .eq("session_id", sid).order("completed_level").execute())
+        analysis["adaptive_difficulty_history"] = adaptive_q.data or []
+        analysis["adaptive_difficulty_summary"] = summarize_adaptive_history(adaptive_q.data or [])
+    except Exception:
+        analysis["adaptive_difficulty_history"] = []
+        analysis["adaptive_history_status"] = "unavailable"
 
     row = {
         "session_id": sid,

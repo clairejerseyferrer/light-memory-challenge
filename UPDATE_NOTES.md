@@ -120,3 +120,14 @@ The firmware now targets a typical 1.8-inch ST7735 SPI TFT in landscape orientat
 GPIO34 and GPIO35 require separate external 10kΩ pull-up resistors to 3.3V; the corresponding buttons connect those GPIOs to GND when pressed. The firmware configures those two pins as `INPUT`, not `INPUT_PULLUP`.
 
 The TFT uses the ESP32 hardware SPI bus with SCK=18, MOSI=23, and MISO disabled. This is intentional: GPIO19 is therefore available for LED 7. This pin map assumes a classic ESP32 DevKit / ESP32-WROOM board and a 1.8-inch ST7735 128x160 module. Verify the exact TFT controller, tab initialization, voltage, and backlight requirements before wiring. The firmware has not been compiled or tested on the team's physical hardware.
+
+## Intelligent System adaptive gameplay integration (v2: response time only)
+
+- Sequence length and displayed level follow the ORIGINAL fixed progression: level 1 = 3 buttons, +1 button after every successfully completed level, regardless of performance. Nothing in the Intelligent System can change it.
+- The only adaptive parameter is a bounded response-time adjustment (ms) added to the original level-based time `T(L) = MIN(30 s, 15 s + 1 s*(L-1))`. Limits: adjustment -4 s .. +10 s, adjusted base time 10 s .. 40 s, grace period (5 s) unchanged. LED_ON_MS, LED_GAP_MS and LED_BEEP_MS are unchanged.
+- After a level is cleared the ESP32 posts that level's statistics to `/api/device/adaptive-decision`. FastAPI classifies with the existing PDF thresholds and returns `new_response_time_adjustment_ms`. Excellent tightens by 0.5-1 s, Good by 0.5 s (only when the PDF rules allow an increase), Average keeps the current setting, Struggling adds 2 s (3 s below 30 % accuracy).
+- Tightening needs >= 2 sequences of evidence and is deferred for one level right after an ease. Easing is never withheld.
+- The ESP32 advances level/sequence with the original rule first, then applies the validated adjustment, then reports the actual settings to `/api/device/adaptive-applied`. A failed request or invalid reply keeps the current adjustment (0 = exactly the original timing) and never blocks progression.
+- Decisions are stored in `game_adaptive_events` (one per session/level). Recommended and actual values are stored side by side; `applied = NULL` means the board never confirmed. Rows from the earlier sequence-length design keep `policy_version = NULL` and are preserved.
+- Database: run `database/migrations/migration_adaptive_response_time.sql` (additive) after the already-applied `migration_adaptive_difficulty.sql`.
+- Tests: `python3 -m unittest discover -s tests -t .` (needs g++ for the firmware-timing host test). See ADAPTIVE_DIFFICULTY_REVIEW.md.

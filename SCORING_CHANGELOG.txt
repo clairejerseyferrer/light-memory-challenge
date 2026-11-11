@@ -1,15 +1,30 @@
-LMC scoring update — 2026-10-28
+LMC scoring update — corrected implementation
 
-Requested rule: 100 points, minus 10 points for every whole second under 10 seconds.
+Scoring rule:
+  full_score_window_ms = 5,000 + 1,000 * (level - 1)
+  deadline_ms = the same responseLimitForLevel() used by the countdown and timeout
+  if response_time_ms <= full_score_window_ms: points = 100
+  else if response_time_ms >= deadline_ms: points = 0
+  else: points = round(100 * (deadline_ms - response_time_ms) /
+                       (deadline_ms - full_score_window_ms))
 
-Implemented formula for a successful round:
-  secs = floor(response_time_ms / 1000)
-  if secs >= 10: points = 100
-  otherwise: points = max(0, 100 - 10 * (10 - secs))
-  if response time exceeds the level deadline plus grace period: points = 0 and a life is lost.
+Examples at Level 1 with the original 20-second deadline:
+  0–5 seconds: 100 points
+  12.5 seconds: approximately 50 points
+  20 seconds or later: 0 points
 
-Examples: 1s=10, 2s=20, ... 9s=90, 10s or more=100 (if within deadline).
+The full-score window increases by one second per level. The Intelligent System's
+response-time adjustment changes the deadline, but does not change the full-score
+window. Countdown, timeout, and scoring use the same deadline.
 
-Changed: firmware scoring threshold and comments; Excel formula workbook labels/parameter; documentation.
-Unchanged: game flow, backend endpoints, dashboard, reconnection/failure handling, offline queue, retry handling, and payload structure.
-Hardware and live-backend tests have not been performed by this script.
+The previous rule (10 points at 1 second, 100 points at 10 seconds or more)
+was counterintuitive because it rewarded slower responses. It has been removed.
+
+Unchanged:
+  - Three-life mistake/game-over behavior
+  - Correct/incorrect sequence handling
+  - Original level and sequence-length progression
+  - LED playback timing
+  - Backend result payload and Supabase score fields
+
+Hardware and live-backend tests are still required before deployment.
