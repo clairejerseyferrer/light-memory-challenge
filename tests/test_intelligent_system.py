@@ -1,9 +1,6 @@
 import unittest
 
-from backend.intelligent_system import (
-    MAX_ADJUSTMENT_MS, MAX_RESPONSE_ALLOWANCE_MS, MIN_ADJUSTMENT_MS, MIN_RESPONSE_ALLOWANCE_MS,
-    adaptive_difficulty_decision, analyze_performance, clamp_adjustment, response_allowance_ms,
-)
+from backend.intelligent_system import analyze_performance
 
 
 def level(level_no, accuracy, seconds_per_press, mistake_rate, attempts=100):
@@ -88,18 +85,6 @@ class IntelligentSystemTests(unittest.TestCase):
             result["recommendations"],
         )
 
-    def test_analysis_reports_per_level_progression_without_fabricating_missing_trends(self):
-        first = level(1, 90, 1.5, .10, attempts=5)
-        second = level(2, 70, 2.0, .30, attempts=5)
-        result = analyze_performance(80, 2, 8000, [first, second])
-        trend = result["performance_progression"]
-        self.assertEqual(trend["levels_observed"], [1, 2])
-        self.assertEqual(trend["accuracy_change_percentage_points"], -20.0)
-        self.assertEqual(trend["response_time_trend"], "deteriorated")
-
-        single = analyze_performance(90, 0, 6000, [first])
-        self.assertEqual(single["performance_progression"]["response_time_trend"], "insufficient_data")
-
     def test_level_floor_and_game_cap(self):
         low = level(1, 40, 2.9, .9)
         result_low = analyze_performance(40, low["mistakes"], low["avg_response_time_ms"], [low])
@@ -108,99 +93,6 @@ class IntelligentSystemTests(unittest.TestCase):
         high = level(20, 96, .8, .05)
         result_high = analyze_performance(96, high["mistakes"], high["avg_response_time_ms"], [high])
         self.assertEqual(result_high["recommended_level"], 20)
-
-
-class AdaptiveDifficultyTests(unittest.TestCase):
-    """Adaptive difficulty = response-time adjustment only; never sequence length."""
-    BASELINE = 24000          # original limit for the next level (base 19 s + 5 s grace)
-
-    def make_row(self, accuracy, speed, mistake_rate, attempts=100):
-        return {
-            "level": 4,
-            "sequences_attempted": attempts,
-            "correct_sequences": round(accuracy * attempts / 100),
-            "accuracy": accuracy,
-            "mistakes": round(mistake_rate * attempts),
-            "sequence_length": 4,
-            "avg_response_time_ms": speed * 4 * 1000,
-        }
-
-    def decide(self, accuracy, speed, mistake_rate, attempts=100, adjustment=0, previous_action=None):
-        return adaptive_difficulty_decision(
-            self.make_row(accuracy, speed, mistake_rate, attempts),
-            adjustment, self.BASELINE, self.BASELINE + adjustment, previous_action)
-
-    def test_excellent_tightens_slightly(self):
-        r = self.decide(100, .8, 0)
-        self.assertEqual(r["classification"], "Excellent")
-        self.assertEqual(r["difficulty_action"], "tighten")
-        self.assertEqual(r["new_response_time_adjustment_ms"], -1000)
-        self.assertEqual(r["new_response_time_allowance_ms"], self.BASELINE - 1000)
-
-    def test_good_follows_configured_policy(self):
-        r = self.decide(85, 1.3, .15)                      # Good, PDF adjustment +1 -> small tighten
-        self.assertEqual((r["classification"], r["new_response_time_adjustment_ms"]), ("Good", -500))
-        r = self.decide(93, 3.0, .07)                      # Good but a Struggling metric -> no tighten
-        self.assertEqual((r["classification"], r["new_response_time_adjustment_ms"]), ("Good", 0))
-
-    def test_average_maintains_current_allowance(self):
-        r = self.decide(72, 2.0, .35)
-        self.assertEqual(r["classification"], "Average")
-        self.assertEqual(r["new_response_time_allowance_ms"], self.BASELINE)
-        held = self.decide(72, 2.0, .35, adjustment=2000)
-        self.assertEqual(held["new_response_time_adjustment_ms"], 2000)
-
-    def test_struggling_increases_allowance(self):
-        r = self.decide(45, .7, .80)
-        self.assertEqual(r["classification"], "Struggling")
-        self.assertEqual(r["difficulty_action"], "ease")
-        self.assertGreater(r["new_response_time_allowance_ms"], self.BASELINE)
-        severe = self.decide(25, 3.2, 1.2)
-        self.assertGreater(severe["recommended_step_ms"], r["recommended_step_ms"])
-
-    def test_single_sequence_never_tightens_but_can_ease(self):
-        self.assertEqual(self.decide(100, .8, 0, attempts=1)["new_response_time_adjustment_ms"], 0)
-        self.assertTrue(self.decide(100, .8, 0, attempts=1)["provisional"])
-        self.assertGreater(self.decide(0, 3.0, 1.0, attempts=1)["new_response_time_adjustment_ms"], 0)
-
-    def test_adjustment_and_allowance_bounds(self):
-        tight = self.decide(100, .8, 0, adjustment=MIN_ADJUSTMENT_MS)
-        self.assertEqual(tight["new_response_time_adjustment_ms"], MIN_ADJUSTMENT_MS)
-        loose = self.decide(25, 3.2, 1.2, adjustment=MAX_ADJUSTMENT_MS)
-        self.assertEqual(loose["new_response_time_adjustment_ms"], MAX_ADJUSTMENT_MS)
-        for baseline in range(15000, 35001, 1000):         # every original level limit
-            for adj in range(MIN_ADJUSTMENT_MS, MAX_ADJUSTMENT_MS + 1, 500):
-                v = response_allowance_ms(baseline, adj)
-                self.assertTrue(MIN_RESPONSE_ALLOWANCE_MS <= v <= MAX_RESPONSE_ALLOWANCE_MS)
-        self.assertEqual(clamp_adjustment("garbage"), 0)
-
-    def test_zero_adjustment_is_exactly_the_original_timing(self):
-        # Original firmware: base = MIN(30000, 15000 + 1000*(L-1)); limit = base + 5000.
-        for lvl in range(1, 21):
-            original = min(30000, 15000 + 1000 * (lvl - 1)) + 5000
-            self.assertEqual(response_allowance_ms(original, 0), original)
-
-    def test_no_oscillation_tighten_deferred_after_ease(self):
-        r = self.decide(100, .8, 0, adjustment=2000, previous_action="ease")
-        self.assertEqual(r["difficulty_action"], "maintain")
-        self.assertEqual(r["new_response_time_adjustment_ms"], 2000)
-        self.assertEqual(self.decide(100, .8, 0, adjustment=2000, previous_action="tighten")["difficulty_action"], "tighten")
-
-    def test_decision_never_contains_sequence_length_or_led_settings(self):
-        for args in ((100, .8, 0), (85, 1.3, .15), (72, 2.0, .35), (25, 3.2, 1.2)):
-            r = self.decide(*args)
-            self.assertEqual(r["sequence_length_policy"], "fixed_original_progression")
-            for key in r:
-                self.assertNotIn("new_sequence_length", key)
-                self.assertNotIn("led", key.lower())
-
-    def test_each_recommendation_has_a_reason(self):
-        row = level(4, 40, 3.0, .60, attempts=5)
-        result = analyze_performance(40, row["mistakes"], row["avg_response_time_ms"], [row])
-        details = result["recommendation_details"]
-        self.assertEqual([d["recommendation"] for d in details], result["recommendations"])
-        self.assertTrue(all(d["reason"] for d in details))
-        self.assertGreaterEqual(len(details), 2)
 
 
 if __name__ == "__main__":

@@ -67,6 +67,8 @@ PHYSICAL ABANDON BUTTON UPDATE
 
 
 TFT DISPLAY / WIRING
+- The display now uses colored, larger countdown and score screens: the pre-game countdown is prominent, the live turn timer is green during normal time and red during grace time, and round/final score values are enlarged.
+- The supplied project snapshot already contains a TFT countdown flow; these changes improve its visibility rather than adding a new hardware dependency.
 - This firmware revision replaces the I2C OLED with a 1.8-inch ST7735 SPI TFT (typical 128x160 module), rotated to landscape (160x128).
 - TFT wiring: SCK -> GPIO18; SDA/MOSI -> GPIO23; DC/A0 -> GPIO21; RST/RES -> GPIO22; CS -> GND; VCC -> 3.3V (unless the exact module documentation specifies otherwise); GND -> ESP32 GND.
 - If the TFT has a BL/LED backlight pin, follow the exact module's documentation. Many breakout boards allow BL/LED to connect to 3.3V, but verify whether the board includes a current-limiting resistor.
@@ -74,11 +76,3 @@ TFT DISPLAY / WIRING
 - GPIO34 and GPIO35 each need a 10kΩ external pull-up resistor to 3.3V. Do not use INPUT_PULLUP for these pins.
 - This pin map assumes a classic ESP32 DevKit / ESP32-WROOM board. Confirm the exact ESP32 variant before wiring.
 - The firmware has been edited from the repository source but has NOT been compiled or physically tested against your exact TFT module/ESP32 board. Test the display and each button before full gameplay.
-
-ADAPTIVE DIFFICULTY UPDATE (v2 - response time only)
-- Keep AdaptiveTiming.h in the same folder as LightMemoryChallenge.ino (it holds the original level timing plus the bounded adaptive adjustment and is unit-tested on a PC).
-- Apply database/migrations/migration_adaptive_response_time.sql in Supabase (after migration_adaptive_difficulty.sql, which is already applied).
-- Deploy the updated FastAPI backend with matching DEVICE_API_TOKEN / SECRET_DEVICE_TOKEN.
-- After each successfully cleared level the firmware requests a decision. Only the response-time limit can change (bounded -4 s..+10 s around the original level time). Sequence length is ALWAYS +1 per cleared level; LED_ON_MS / LED_GAP_MS / LED_BEEP_MS are untouched.
-- If Wi-Fi/backend is unavailable or a response is invalid, the current time setting is kept (0 = original timing) and progression is unaffected.
-- This firmware revision has NOT been compiled for the ESP32 or tested on the physical board in this review. Compile it and play-test levels 1-5 before use.

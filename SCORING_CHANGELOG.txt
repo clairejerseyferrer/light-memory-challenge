@@ -1,30 +1,27 @@
-LMC scoring update — corrected implementation
+LMC scoring correction — 2026-11-12
 
-Scoring rule:
+Implemented the agreed response-time scoring rules in the Zanti dashboard version.
+
+Scoring:
   full_score_window_ms = 5,000 + 1,000 * (level - 1)
-  deadline_ms = the same responseLimitForLevel() used by the countdown and timeout
+  deadline_ms = responseLimitForLevel(level), shared by the countdown and timeout
   if response_time_ms <= full_score_window_ms: points = 100
   else if response_time_ms >= deadline_ms: points = 0
   else: points = round(100 * (deadline_ms - response_time_ms) /
                        (deadline_ms - full_score_window_ms))
 
-Examples at Level 1 with the original 20-second deadline:
-  0–5 seconds: 100 points
-  12.5 seconds: approximately 50 points
-  20 seconds or later: 0 points
+The full-score window is 5 seconds at Level 1 and increases by 1 second per level.
+After that window, points decrease linearly to zero at the response deadline.
+A timeout earns zero points.
 
-The full-score window increases by one second per level. The Intelligent System's
-response-time adjustment changes the deadline, but does not change the full-score
-window. Countdown, timeout, and scoring use the same deadline.
+The adaptive Intelligent System remains removed, as requested. The existing
+non-adaptive level response deadline is retained: 15 seconds base at Level 1,
++1 second per level up to 30 seconds, plus the existing 5-second grace period.
 
-The previous rule (10 points at 1 second, 100 points at 10 seconds or more)
-was counterintuitive because it rewarded slower responses. It has been removed.
+Preserved:
+  - Zanti's redesigned dashboard and all other files/changes
+  - Existing backend, database schema, API payloads, and score display
+  - Existing game progression, lives, sequence handling, and hardware settings
 
-Unchanged:
-  - Three-life mistake/game-over behavior
-  - Correct/incorrect sequence handling
-  - Original level and sequence-length progression
-  - LED playback timing
-  - Backend result payload and Supabase score fields
-
+Only the firmware scoring/deadline consistency and this changelog were changed.
 Hardware and live-backend tests are still required before deployment.

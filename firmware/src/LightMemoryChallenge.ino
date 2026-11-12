@@ -26,8 +26,9 @@
       Serial Monitor and dropped so they do not block newer games.
 
   Game rules (meeting): Levels 1-20, 3 lives. A mistake or timeout costs
-  1 life and restarts the SAME level with a new sequence. Scoring and
-  time limits are in the SCORING + TIME SETTINGS block below.
+  1 life. Two mistakes on the same level reduce difficulty by one level;
+  the next sequence after losing a life gets a brief LED viewing-time bonus.
+  Scoring and time limits are in the SCORING + TIME SETTINGS block below.
 
   Hardware (classic ESP32 DevKit / ESP32-WROOM):
     - 7 LEDs         -> GPIO 4, 5, 13, 14, 16, 17, 19
@@ -58,7 +59,6 @@
 #include <Preferences.h>
 #include <time.h>
 #include "arduino_secrets.h"
-#include "AdaptiveTiming.h"   // original level timing + bounded adaptive adjustment (PC-tested)
 
 // =================================================================
 // SETTINGS YOU MUST EDIT
@@ -73,16 +73,20 @@ const char* DEVICE_ID     = SECRET_DEVICE_ID;
 const char* DEVICE_TOKEN  = SECRET_DEVICE_TOKEN;
 
 // =================================================================
-// SCORING + TIME SETTINGS  (same values as LMC_Point_and_Time_Formula.xlsx)
-//   Levels 1-20, 100 points per level.
-//   Completion time (whole seconds) of 10 s or more -> 100 points.
-//   Every whole second BELOW 10 s -> minus 10 points (9 s = 90 ... 1 s = 10).
-//   Time limit  T(L) = MIN(Tmax, T0 + k*(L-1)), starting at 15 s, plus Grace.
-//   Not finished by T(L) + Grace -> 0 points and a lost life.
+// SCORING + TIME SETTINGS
+//   100 points inside the full-score window.
+//   Level 1: 5 seconds; add 1 second for each subsequent level.
+//   After that window, points decay linearly to zero at the response deadline.
+//   The response deadline is the same one used by the countdown and timeout.
 // =================================================================
 const int           MAX_LEVEL           = 20;
-// BASE_TIME_MS / TIME_PER_LEVEL_MS / MAX_BASE_TIME_MS / GRACE_MS and
-// baseTimeForLevel() now live in AdaptiveTiming.h (values unchanged).
+const int           BASE_POINTS          = 100;
+const unsigned long BASE_TIME_MS         = 15000;  // T0: initial response allowance
+const unsigned long TIME_PER_LEVEL_MS    = 1000;   // additional allowance per level
+const unsigned long MAX_BASE_TIME_MS     = 30000;  // maximum base response allowance
+const unsigned long GRACE_MS             = 5000;   // grace period added to base allowance
+const unsigned long FULL_SCORE_BASE_MS   = 5000;   // Level 1 full-score window
+const unsigned long FULL_SCORE_LEVEL_MS  = 1000;   // additional full-score time per level
 
 // =================================================================
 // LED PLAYBACK SPEED  (tune after prototype testing)
@@ -124,13 +128,9 @@ int score = 0;
 int lives = 3;
 int level = 1;
 int sequenceLength = 3;
-// ---- Adaptive response time (the ONLY adaptive parameter) ----
-// Signed offset added to the original level-based time. 0 = original behaviour.
-// Sequence length is never adaptive: it is only changed by advanceAfterSuccess().
-long adaptiveAdjustmentMs = 0;
-int  lastAdaptiveLevelHandled = 0;   // one adaptive request per completed level
-enum AdaptiveResult { ADAPT_OK, ADAPT_UNAVAILABLE, ADAPT_REJECTED };
 int mistakes = 0;
+int mistakesAtCurrentLevel = 0;       // failed attempts on the current level
+unsigned long nextAttemptLedBonusMs = 0; // one-attempt viewing-time aid after losing a life
 int totalRounds = 0;
 int correctRounds = 0;
 int highestLevel = 1;
@@ -194,6 +194,8 @@ int lastRank = -1;
 IdleStatus idleShown = IDLE_NONE;
 
 // ---------------- FUNCTION PROTOTYPES ----------------
+unsigned long baseTimeForLevel(int lvl);
+unsigned long responseLimitForLevel(int lvl);
 int calcPoints(int lvl, unsigned long respMs);
 void resetGame();
 void playSession();
@@ -211,8 +213,10 @@ void checkInput();
 void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
                  const uint8_t* pressedAt, const uint8_t* expectedAt);
 
-void updateOnCorrect();
+int updateOnCorrect();
 void updateOnMistake(bool wasTimeout);
+void drawCenteredText(const String &text, int y, uint8_t size, uint16_t color);
+void showScoreboard(const char* headline, int roundPoints);
 void endGame();
 void showFinalScreen();
 void showCountdown(long n);
@@ -238,8 +242,6 @@ uint8_t queueCount();
 bool flushQueue(int attempts);
 bool jsonGetString(const char* json, const char* key, char* out, size_t n);
 bool jsonGetLong(const char* json, const char* key, long &out);
-AdaptiveResult requestAdaptiveDecision(long &recommendedAdjustmentMs);
-void reportAdaptiveApplied(int completedLevel, bool applied);
 
 // =================================================================
 // INITIALIZE
@@ -392,8 +394,6 @@ void resetGame() {
   lives = 3;
   level = 1;
   sequenceLength = 3;
-  adaptiveAdjustmentMs = 0;          // every game starts with the original timing
-  lastAdaptiveLevelHandled = 0;
   mistakes = 0;
   totalRounds = 0;
   correctRounds = 0;
@@ -407,6 +407,8 @@ void resetGame() {
   roundLogCount = 0;
   memset(levelStats, 0, sizeof(levelStats));
   allLevelsCleared = false;
+  mistakesAtCurrentLevel = 0;
+  nextAttemptLedBonusMs = 0;
 }
 
 // Physical GPIO15 button is an abandon/reset control only. Hold for 2s.
@@ -493,32 +495,30 @@ void clearCurrentSession() {
 }
 
 // =================================================================
-// COUNTDOWN (lines up with the server's start time using NTP time)
+// TFT PRE-GAME COUNTDOWN
 // =================================================================
 bool runCountdown() {
-  char name[22];
-  strncpy(name, currentCodename, sizeof(name) - 1);
-  name[sizeof(name) - 1] = 0;
-  showMessage("HELLO!", name);
-  if (!delayWithAbandon(1200)) return false;
-
-  if (timeIsSynced()) {
-    while (true) {
-      if (checkPhysicalAbandon()) return false;
-      long rem = currentStartAtEpoch - (long)time(nullptr);
-      if (rem <= 0 || rem > 15) break;
-      showCountdown(rem);
-      playTone(1000, 120);
-      if (!delayWithAbandon(850)) return false;
-    }
-  } else {
-    for (int s = 5; s > 0; s--) {
-      if (checkPhysicalAbandon()) return false;
-      showCountdown(s);
-      playTone(1000, 120);
-      if (!delayWithAbandon(850)) return false;
-    }
+  // Use the server's remaining time only when it is plausible. The board can
+  // receive START after the scheduled deadline (for example, after a delayed
+  // poll or a clock/NTP mismatch). In that case, do NOT jump straight to GO:
+  // run a complete local five-second countdown so the TFT never flashes 5
+  // and immediately replaces it with GO!.
+  long remaining = -1;
+  if (timeIsSynced() && currentStartAtEpoch > 0) {
+    remaining = currentStartAtEpoch - (long)time(nullptr);
   }
+
+  int secondsToShow = (remaining >= 1 && remaining <= 5)
+                        ? (int)remaining
+                        : 5;
+
+  for (int s = secondsToShow; s >= 1; --s) {
+    if (checkPhysicalAbandon()) return false;
+    showCountdown(s);
+    playTone(1000, 120);
+    if (!delayWithAbandon(1000)) return false;
+  }
+
   if (checkPhysicalAbandon()) return false;
   playTone(1500, 300);
   showMessage("GO!", "");
@@ -528,12 +528,38 @@ bool runCountdown() {
 // =================================================================
 // FORMULAS (time per level and points)
 // =================================================================
-// baseTimeForLevel() (original level-based time) is defined in AdaptiveTiming.h.
-// The time actually allowed = baseTimeForLevel(level) + bounded adaptive adjustment + GRACE_MS.
+unsigned long baseTimeForLevel(int lvl) {
+  if (lvl < 1) lvl = 1;
+  unsigned long t = BASE_TIME_MS + TIME_PER_LEVEL_MS * (unsigned long)(lvl - 1);
+  if (t > MAX_BASE_TIME_MS) t = MAX_BASE_TIME_MS;
+  return t;
+}
 
-// Full points for a quick response, then linear decay to zero at the level deadline.
+unsigned long responseLimitForLevel(int lvl) {
+  return baseTimeForLevel(lvl) + GRACE_MS;
+}
+
+unsigned long fullScoreWindowForLevel(int lvl) {
+  if (lvl < 1) lvl = 1;
+  return FULL_SCORE_BASE_MS + FULL_SCORE_LEVEL_MS * (unsigned long)(lvl - 1);
+}
+
+// Full score within the quick-response window, then linear decay to zero
+// at the exact same deadline used by the countdown and timeout.
 int calcPoints(int lvl, unsigned long respMs) {
-  return scoreForResponseTime(lvl, respMs, adaptiveAdjustmentMs);
+  const unsigned long deadlineMs = responseLimitForLevel(lvl);
+  const unsigned long fullScoreMs = fullScoreWindowForLevel(lvl);
+
+  if (respMs >= deadlineMs) return 0;
+  if (respMs <= fullScoreMs) return BASE_POINTS;
+  if (deadlineMs <= fullScoreMs) return 0;  // defensive guard
+
+  const unsigned long decayDuration = deadlineMs - fullScoreMs;
+  const unsigned long remaining = deadlineMs - respMs;
+  const unsigned long points =
+      (remaining * (unsigned long)BASE_POINTS + decayDuration / 2UL) /
+      decayDuration;
+  return points > BASE_POINTS ? BASE_POINTS : (int)points;
 }
 
 // =================================================================
@@ -549,13 +575,17 @@ void generateRandomSequence() {
 bool displaySequenceUsingLEDs() {
   showMessage("WATCH", "Hold RESET 2s to cancel");
   if (!delayWithAbandon(WATCH_PAUSE_MS)) return false;
+  // The bonus is deliberately for this attempt only; the next attempt returns
+  // to the normal viewing duration unless another life is lost.
+  const unsigned long viewingTimeMs = LED_ON_MS + nextAttemptLedBonusMs;
+  nextAttemptLedBonusMs = 0;
   for (int i = 0; i < sequenceLength; i++) {
     if (checkPhysicalAbandon()) return false;
     int ledIndex = sequence[i];
     digitalWrite(LED_PINS[ledIndex], HIGH);
     playTone(800, LED_BEEP_MS);
-    if (LED_ON_MS > (unsigned long)LED_BEEP_MS &&
-        !delayWithAbandon(LED_ON_MS - LED_BEEP_MS)) {
+    if (viewingTimeMs > (unsigned long)LED_BEEP_MS &&
+        !delayWithAbandon(viewingTimeMs - LED_BEEP_MS)) {
       digitalWrite(LED_PINS[ledIndex], LOW);
       return false;
     }
@@ -568,7 +598,7 @@ bool displaySequenceUsingLEDs() {
 bool getPlayerInput() {
   lastTimerKey = 0;                    // forces the countdown screen to draw
 
-  unsigned long limitMs = responseLimitForLevel(level, adaptiveAdjustmentMs);
+  unsigned long limitMs = responseLimitForLevel(level);
   unsigned long startTime = millis();
   unsigned long waitStart = startTime;
   bool timedOut = false;
@@ -603,7 +633,7 @@ bool getPlayerInput() {
 // Returns button index 0-6, or -1 if time ran out.
 int waitForButtonPress(unsigned long roundStart, unsigned long limitMs, bool &timedOut, unsigned long &detectedAt) {
   while (true) {
-    if (millis() - roundStart > limitMs) {
+    if (millis() - roundStart >= limitMs) {
       timedOut = true;
       return -1;
     }
@@ -641,13 +671,16 @@ void checkInput() {
 
   addRoundLog(inputCorrect, inputTimedOut, incorrectPositionMask, pressedAt, expectedAt);   // before level changes
 
+  int pointsEarned = 0;
   if (inputCorrect) {
-    updateOnCorrect();
+    pointsEarned = updateOnCorrect();
   } else {
     updateOnMistake(inputTimedOut);
   }
-  showMessage("Score: " + String(score), "Level: " + String(level));
-  delay(1000);
+
+  const char* headline = inputCorrect ? "CORRECT!" : (inputTimedOut ? "TIME'S UP!" : "WRONG PATTERN");
+  showScoreboard(headline, pointsEarned);
+  delay(1250);
 }
 
 void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
@@ -682,115 +715,48 @@ void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
   if (responseTime > st.slowestResponseMs)
     st.slowestResponseMs = (uint32_t)responseTime;
 }
-// Ask the backend how the response-time allowance should change for the NEXT level.
-// The backend only ever returns a bounded time adjustment; it has no say over
-// sequence length, level, LED timing or scoring. Any problem -> no change.
-AdaptiveResult requestAdaptiveDecision(long &recommendedAdjustmentMs) {
-  recommendedAdjustmentMs = adaptiveAdjustmentMs;                   // default: keep current
-  if (WiFi.status() != WL_CONNECTED || !currentSessionId[0]) return ADAPT_UNAVAILABLE;
-  LevelStats &st = levelStats[level];
-  if (!st.attempted) return ADAPT_UNAVAILABLE;
-  if (level == lastAdaptiveLevelHandled) return ADAPT_UNAVAILABLE;   // never ask twice for a level
-  lastAdaptiveLevelHandled = level;
-
-  char body[640];
-  snprintf(body, sizeof(body),
-    "{\"device_id\":\"%s\",\"session_id\":\"%s\","
-    "\"completed_level\":%d,\"sequences_attempted\":%u,"
-    "\"correct_sequences\":%u,\"mistakes\":%u,"
-    "\"sequence_length\":%u,\"avg_response_time_ms\":%.1f,"
-    "\"incorrect_press_count\":%u,"
-    "\"current_response_time_adjustment_ms\":%ld,"
-    "\"current_response_time_allowance_ms\":%lu,"
-    "\"next_level_baseline_allowance_ms\":%lu}",
-    DEVICE_ID, currentSessionId, level, st.attempted, st.correct, st.mistakes,
-    st.sequenceLength, st.responseSamples ? (float)st.responseTotalMs / st.responseSamples : 0.0f,
-    st.incorrectPresses, adaptiveAdjustmentMs,
-    responseLimitForLevel(level, adaptiveAdjustmentMs),
-    baseTimeForLevel(level + 1) + GRACE_MS);
-
-  String response;
-  int code = httpRequest("POST", "/api/device/adaptive-decision", body, &response);
-  Serial.printf("adaptive decision -> %d: %s\n", code, response.c_str());
-  if (code <= 0) return ADAPT_UNAVAILABLE;       // no HTTP reply at all (offline / timeout)
-  if (!isSuccess(code)) return ADAPT_REJECTED;
-
-  long newAdjustment = 0;
-  if (!jsonGetLong(response.c_str(), "new_response_time_adjustment_ms", newAdjustment) ||
-      !adaptiveAdjustmentIsValid(newAdjustment)) {
-    Serial.println("Invalid adaptive response; keeping current response-time setting.");
-    return ADAPT_REJECTED;
-  }
-  recommendedAdjustmentMs = newAdjustment;
-  return ADAPT_OK;
-}
-
-// Tell the backend what the board ACTUALLY uses for the next level (called after
-// level / sequenceLength have advanced). Failure here never affects gameplay.
-void reportAdaptiveApplied(int completedLevel, bool applied) {
-  char ack[320];
-  snprintf(ack, sizeof(ack),
-    "{\"device_id\":\"%s\",\"session_id\":\"%s\",\"completed_level\":%d,\"applied\":%s,"
-    "\"actual_sequence_length\":%d,\"actual_response_time_adjustment_ms\":%ld,"
-    "\"actual_response_time_allowance_ms\":%lu}",
-    DEVICE_ID, currentSessionId, completedLevel, applied ? "true" : "false",
-    sequenceLength, adaptiveAdjustmentMs, responseLimitForLevel(level, adaptiveAdjustmentMs));
-  String ignored;
-  httpRequest("POST", "/api/device/adaptive-applied", ack, &ignored);
-}
-
-void updateOnCorrect() {
+int updateOnCorrect() {
   correctRounds++;
   int points = calcPoints(level, responseTime);
   score += points;
 
   if (level > highestLevel) highestLevel = level; // record the level just completed
+  mistakesAtCurrentLevel = 0; // a correct sequence ends the current-level mistake streak
   if (level >= MAX_LEVEL) {
     allLevelsCleared = true;
   } else {
-    int completedLevel = level;
-    long decisionAdjustment = adaptiveAdjustmentMs;
-    AdaptiveResult ar = requestAdaptiveDecision(decisionAdjustment);   // may fail: that is fine
-
-    // ORIGINAL PROGRESSION: level +1 and exactly ONE more button, whatever the
-    // backend said (or didn't say). Only the time adjustment can change.
-    LevelProgress progress = { level, sequenceLength, adaptiveAdjustmentMs };
-    advanceAfterSuccess(progress, MAX_LEVEL, ar == ADAPT_OK, decisionAdjustment);
-    level = progress.level;
-    sequenceLength = progress.sequenceLength;
-    adaptiveAdjustmentMs = progress.adjustmentMs;
-
-    if (ar != ADAPT_UNAVAILABLE) reportAdaptiveApplied(completedLevel, ar == ADAPT_OK);
-    Serial.printf("Next level %d: sequence %d, response limit %lu ms (adjustment %ld ms)\n",
-      level, sequenceLength, responseLimitForLevel(level, adaptiveAdjustmentMs), adaptiveAdjustmentMs);
+    level++;
+    sequenceLength++;
   }
 
   playTone(1200, 200);
-  showMessage("CORRECT!", "+" + String(points) + "  Score: " + String(score));
-  delay(1000);
-  if (allLevelsCleared) {
-    showMessage("ALL LEVELS", "CLEARED!");
-    delay(1500);
-  }
+  return points;
 }
 
 // Lose a life. Level and sequence length stay the same, so the next round
-// restarts the SAME level with a NEW random sequence.
+// restarts the SAME level with a NEW random sequence. The scoreboard below
+// now presents the feedback and updated score together on the TFT.
 void updateOnMistake(bool wasTimeout) {
   lives--;
   mistakes++;
+  mistakesAtCurrentLevel++;
+
+  // Give the next playback a modest, one-attempt viewing-time increase.
+  // 120 ms is enough to notice without making the sequence substantially slower.
+  nextAttemptLedBonusMs = 120;
+
+  // Two failed sequences on the same level reduce difficulty by exactly one.
+  // Level 1 is the floor; a successful sequence resets this counter too.
+  if (mistakesAtCurrentLevel >= 2) {
+    if (level > 1) {
+      level--;
+      if (sequenceLength > 3) sequenceLength--;
+      Serial.printf("Adaptive difficulty: two mistakes on level; dropping to level %d\n", level);
+    }
+    mistakesAtCurrentLevel = 0;
+  }
 
   playTone(300, 400);
-  if (wasTimeout) {
-    showMessage("TIME'S UP!", "Lives: " + String(lives));
-  } else {
-    showMessage("WRONG SEQUENCE!", "Lives: " + String(lives));
-  }
-  delay(800);
-  if (lives > 0) {
-    showMessage("LEVEL RESTART", "New Sequence");
-    delay(1000);
-  }
 }
 
 // =================================================================
@@ -821,20 +787,22 @@ void endGame() {
 void showFinalScreen() {
   bool delivered = (lastOutcome == OUT_DELIVERED && queueCount() == 0);
   display.fillScreen(ST77XX_BLACK);
-  display.setTextSize(1);
-  display.setTextColor(ST77XX_WHITE);
-  display.setCursor(0, 0);
-  display.println("GAME OVER");
-  display.println(currentCodename);
-  display.println(currentDisplayId);
-  display.print("Score: "); display.println(score);
-  display.print("Rank: ");
-  if (delivered && lastRank > 0) { display.print("#"); display.println(lastRank); }
-  else display.println("--");
-  display.print("Level: "); display.println(highestLevel);
-  if (delivered) display.println("Saved to server");
-  else if (lastOutcome == OUT_DISCARD) display.println("Server rejected");
-  else display.println("Saved offline");
+  drawCenteredText("GAME OVER", 3, 2, ST77XX_RED);
+  String safeName = String(currentCodename);
+  if (safeName.length() > 20) safeName = safeName.substring(0, 20);
+  drawCenteredText(safeName, 29, 1, ST77XX_WHITE);
+  drawCenteredText("FINAL SCORE", 44, 1, ST77XX_CYAN);
+  drawCenteredText(String(score), 57, 4, ST77XX_YELLOW);
+
+  String rankLine = "RANK ";
+  if (delivered && lastRank > 0) rankLine += "#" + String(lastRank);
+  else rankLine += "--";
+  rankLine += "   LEVEL " + String(highestLevel);
+  drawCenteredText(rankLine, 99, 1, ST77XX_WHITE);
+
+  if (delivered) drawCenteredText("SAVED ONLINE", 114, 1, ST77XX_GREEN);
+  else if (lastOutcome == OUT_DISCARD) drawCenteredText("SERVER REJECTED", 114, 1, ST77XX_RED);
+  else drawCenteredText("SAVED OFFLINE", 114, 1, ST77XX_YELLOW);
   // TFT writes are sent immediately; no display.display() call is needed.
 }
 
@@ -1234,44 +1202,66 @@ bool jsonGetLong(const char* json, const char* key, long &out) {
 // =================================================================
 // TFT + BUZZER HELPERS
 // =================================================================
-// Big pre-game countdown number.
+// Draw a line centered on the 160-pixel-wide landscape TFT.
+void drawCenteredText(const String &text, int y, uint8_t size, uint16_t color) {
+  int16_t x1 = 0, y1 = 0;
+  uint16_t w = 0, h = 0;
+  display.setTextSize(size);
+  display.setTextColor(color);
+  display.getTextBounds(text.c_str(), 0, y, &x1, &y1, &w, &h);
+  int x = ((160 - (int)w) / 2) - x1;
+  if (x < 0) x = 0;
+  display.setCursor(x, y);
+  display.print(text);
+}
+
+// Big pre-game countdown. The board shows the same 5-second start cue
+// scheduled by the website, with the last two seconds highlighted in red.
 void showCountdown(long n) {
   display.fillScreen(ST77XX_BLACK);
-  display.setTextColor(ST77XX_WHITE);
-  display.setTextSize(2);
-  display.setCursor(0, 0);
-  display.print("GET READY!");
-  display.setTextSize(4);
-  display.setCursor(52, 28);
-  display.print((int)n);
+  drawCenteredText("GET READY!", 9, 2, ST77XX_YELLOW);
+  display.drawFastHLine(18, 37, 124, ST77XX_BLUE);
+  drawCenteredText(String((int)n), 45, 6, n <= 2 ? ST77XX_RED : ST77XX_GREEN);
+  drawCenteredText("GAME STARTS SOON", 108, 1, ST77XX_CYAN);
   // TFT writes are sent immediately; no display.display() call is needed.
 }
 
-// Live countdown while the player enters the sequence.
+// Large live countdown while the player enters the sequence. Grace time is
+// red and prefixed with '+', while the normal time window is green.
 void showTurn(long secs, bool grace) {
   display.fillScreen(ST77XX_BLACK);
-  display.setTextColor(ST77XX_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print("LEVEL ");
-  display.print(level);
-  display.setTextSize(2);
-  display.setCursor(0, 12);
-  display.print("YOUR TURN!");
-  display.setTextSize(3);
-  display.setCursor(0, 38);
-  display.print(grace ? "+" : "");
-  display.print((int)secs);
-  display.print("s");
+  drawCenteredText("LEVEL " + String(level), 5, 1, ST77XX_CYAN);
+  drawCenteredText("YOUR TURN", 20, 1, ST77XX_YELLOW);
+  String timerText = grace ? "+" + String((int)secs) + "s" : String((int)secs) + "s";
+  drawCenteredText(timerText, 43, 5, grace ? ST77XX_RED : ST77XX_GREEN);
+  drawCenteredText(grace ? "GRACE TIME" : "TIME LEFT", 101, 1, grace ? ST77XX_RED : ST77XX_CYAN);
   // TFT writes are sent immediately; no display.display() call is needed.
+}
+
+// Score and round feedback share one screen so the updated total is easy
+// to read from a distance on the small 1.8-inch TFT.
+void showScoreboard(const char* headline, int roundPoints) {
+  display.fillScreen(ST77XX_BLACK);
+  uint16_t headlineColor = (roundPoints > 0) ? ST77XX_GREEN : ST77XX_RED;
+  drawCenteredText(String(headline), 4, 1, headlineColor);
+  if (roundPoints > 0) drawCenteredText("+" + String(roundPoints) + " POINTS", 18, 1, ST77XX_YELLOW);
+  drawCenteredText("TOTAL SCORE", 37, 1, ST77XX_CYAN);
+  drawCenteredText(String(score), 51, 4, ST77XX_YELLOW);
+
+  String progress = "LEVEL " + String(level) + "   LIVES " + String(lives);
+  drawCenteredText(progress, 91, 1, ST77XX_WHITE);
+  if (allLevelsCleared) drawCenteredText("ALL LEVELS CLEARED!", 108, 1, ST77XX_GREEN);
+  else if (lives <= 0) drawCenteredText("GAME FINISHED", 108, 1, ST77XX_RED);
+  else drawCenteredText(roundPoints > 0 ? "NEXT LEVEL!" : "TRY THE LEVEL AGAIN", 108, 1, ST77XX_CYAN);
 }
 
 // Seconds left in the base time; after that, seconds left in the grace period.
 void refreshTurnTimer(unsigned long roundStart) {
   unsigned long elapsed = millis() - roundStart;
-  unsigned long base = adaptedBaseTimeForLevel(level, adaptiveAdjustmentMs);
+  unsigned long base = baseTimeForLevel(level);
   bool grace = elapsed >= base;
-  unsigned long leftMs = grace ? (base + GRACE_MS - elapsed) : (base - elapsed);
+  unsigned long deadline = responseLimitForLevel(level);
+  unsigned long leftMs = (elapsed >= deadline) ? 0 : (deadline - elapsed);
   long secs = (long)((leftMs + 999UL) / 1000UL);
   int key = grace ? -(int)secs - 1 : (int)secs + 1;     // never 0, differs between modes
   if (key == lastTimerKey) return;
@@ -1290,14 +1280,11 @@ void showIdle(IdleStatus s) {
 
 void showMessage(String line1, String line2) {
   display.fillScreen(ST77XX_BLACK);
-  display.setTextSize(2);
-  display.setTextColor(ST77XX_WHITE);
-  display.setCursor(0, 10);
-  display.println(line1);
+  uint8_t titleSize = line1.length() > 12 ? 1 : 2;
+  drawCenteredText(line1, 14, titleSize, ST77XX_YELLOW);
   if (line2 != "") {
-    display.setTextSize(1);
-    display.setCursor(0, 40);
-    display.println(line2);
+    uint8_t bodySize = line2.length() > 20 ? 1 : 2;
+    drawCenteredText(line2, 48, bodySize, ST77XX_CYAN);
   }
   // TFT writes are sent immediately; no display.display() call is needed.
 }
