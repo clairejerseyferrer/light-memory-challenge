@@ -18,6 +18,17 @@
       .level-chart{display:grid;gap:12px;margin:14px 0}.level-card{background:#fffdf4;border:1px solid var(--line);border-radius:13px;padding:13px;min-width:0}.level-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}.level-name{font-weight:850}.metric-line{display:grid;grid-template-columns:minmax(88px,112px) 1fr auto;gap:8px;align-items:center;margin:9px 0;font-size:.85rem}.bar-track{height:11px;background:#f0dfb9;border-radius:99px;overflow:hidden;min-width:0}.bar-fill{height:100%;background:var(--red);border-radius:99px}.bar-fill.time{background:#d89b1c}.level-meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.mini-stat{background:#f9edcf;border-radius:9px;padding:8px;min-width:0}.mini-stat strong{display:block;font-size:1rem;overflow-wrap:anywhere}.details{margin-top:10px;font-size:.84rem;color:var(--muted);overflow-wrap:anywhere}.details summary{cursor:pointer;color:var(--wine);font-weight:700}.section-heading{margin:22px 0 8px}.recommendation{padding:11px;border-left:3px solid var(--gold);background:#fff2c9;margin:8px 0;border-radius:0 10px 10px 0}
       .podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:end;margin:22px 0 18px}.podium-item{text-align:center;background:linear-gradient(#fff9eb,#f1e4d3);border:1px solid #c9c9c9;border-radius:14px 14px 8px 8px;padding:12px 6px 16px;min-width:0;box-shadow:0 5px 0 #d2c5b4}.podium-item.first{padding-top:25px;padding-bottom:26px;background:linear-gradient(#fff0a8,#f6ce4c);border:2px solid #dca500;box-shadow:0 7px 0 #bd8700}.podium-item.third{background:linear-gradient(#f8dfc8,#d6a078);border-color:#b8784d;box-shadow:0 5px 0 #a86b45}.podium-rank{font:1.5rem 'Rye',serif;color:var(--wine)}.podium-score{font-weight:900;color:var(--wine)}.podium-name{display:block;overflow-wrap:anywhere;font-weight:850}.podium-base{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:#79513e;margin-top:7px}.table-wrap{overflow-x:auto;border:1px solid #ead8b2;border-radius:12px}table{width:100%;border-collapse:collapse;min-width:570px;background:#fffdf5}th,td{text-align:left;padding:10px;border-bottom:1px solid #ead8b2}th{font-size:.73rem;text-transform:uppercase;color:#966044;background:#fff4d5}tbody tr:last-child td{border-bottom:0}
       .analysis-modal{position:fixed;inset:0;z-index:50;background:#2c071dcc;display:grid;place-items:center;padding:14px}.analysis-dialog{width:min(100%,850px);max-height:92vh;overflow:auto;background:var(--cream);border:3px solid var(--gold);border-radius:20px;padding:16px;box-shadow:0 20px 70px #21000c80}.analysis-dialog-head{position:sticky;top:-16px;z-index:2;background:var(--cream);display:flex;align-items:center;justify-content:space-between;gap:12px;padding:4px 0 12px;border-bottom:1px solid var(--line)}.analysis-dialog-head h2{margin:0}.analysis-close{background:var(--wine);color:white;padding:9px 13px}.analysis-modal .card{box-shadow:none;margin:12px 0}.analysis-modal .section-heading{margin-top:18px}.bottom-nav{display:none}
+      /* ---- UI update: info icons, heads-up, ticket stubs, accordion levels, result pop-up ---- */
+      .title-row{display:flex;align-items:center;gap:6px;margin:0 0 7px}.title-row h2{margin:0}.title-row.section-heading{margin:22px 0 8px}.analysis-modal .title-row.section-heading{margin-top:18px}
+      .info-btn{position:relative;flex:0 0 auto;display:inline-grid;place-items:center;width:20px;height:20px;padding:0;margin-left:6px;border-radius:50%;background:#f7e8bd;color:var(--wine);border:1.5px solid #d9a52b;font:italic 700 .8rem/1 Georgia,serif;vertical-align:middle;box-shadow:none}.info-btn:after{content:"";position:absolute;inset:-8px}.title-row .info-btn{margin-left:0}.info-btn:hover{transform:none}.info-btn[aria-expanded="true"]{background:var(--wine);color:#fff;border-color:var(--wine)}
+      .info-note{display:block;margin:8px 0 12px;padding:9px 12px;border-left:3px solid var(--gold);background:#fff2c9;border-radius:0 10px 10px 0;font-size:.8rem;line-height:1.5;font-weight:400;font-style:normal;color:#6f5448}
+      .heads-up{margin:12px 0 0;padding:12px 15px;border:2px dashed #c2410c;border-radius:12px;background:#ffcf5c;color:#5c2100;font-size:.86rem;font-weight:700;line-height:1.45}.heads-up:before{content:"⚠ ";font-weight:900}
+      #sessionArea{margin-bottom:8px}
+      .analysis-close{min-width:40px;padding:8px 12px;font-size:1.05rem;line-height:1}.results-modal{z-index:45}.results-dialog{width:min(100%,520px)}
+      .level-card{padding:0;overflow:hidden}.level-toggle{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;border-radius:0;background:#fff4d5;color:var(--wine);padding:13px 14px;text-align:left;box-shadow:none}.level-toggle:hover{transform:none}.level-toggle[aria-expanded="true"]{background:#ffe9a8}.level-toggle-right{display:flex;align-items:center;gap:10px;min-width:0}.chev{display:inline-block;transition:transform .15s}.level-toggle[aria-expanded="true"] .chev{transform:rotate(90deg)}.level-body{padding:13px;border-top:1px solid var(--line)}
+      .stub{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 160px;margin:0 0 16px;background:linear-gradient(120deg,#fff6d2,#ffe9a3);border:2px solid #d69e1a;border-radius:14px;box-shadow:var(--shadow);overflow:hidden}.stub-main{padding:15px 18px;min-width:0}.stub-caption{font-size:.68rem;font-weight:900;letter-spacing:.16em;color:#a15e40}.stub .sessionid{font:1.25rem 'Rye',Georgia,serif;margin:2px 0 0}.stub .grid{margin-top:10px}.stub .stat{background:#fffaf0}
+      .stub-side{position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;padding:15px 14px;border-left:3px dashed #c98f12;background:repeating-linear-gradient(135deg,#f9d86a 0 8px,#fbe28c 8px 16px);text-align:center}.stub-side:before,.stub-side:after{content:"";position:absolute;left:-12px;width:22px;height:22px;border-radius:50%;background:var(--paper);border:2px solid #d69e1a}.stub-side:before{top:-12px}.stub-side:after{bottom:-12px}.stub-admit{font:.95rem 'Rye',Georgia,serif;color:var(--wine);line-height:1.15}.stub-side button{width:100%;margin:0}
+      @media(max-width:560px){.stub{grid-template-columns:1fr}.stub-side{border-left:0;border-top:3px dashed #c98f12;flex-direction:row;justify-content:space-between;padding:14px 16px}.stub-side:before,.stub-side:after{top:-12px;bottom:auto}.stub-side:before{left:-12px}.stub-side:after{left:auto;right:-12px}.stub-side button{width:auto;flex:0 0 auto}.stub-admit{text-align:left}}
       @media(max-width:1040px){.app-layout{grid-template-columns:220px minmax(0,1fr)}.sidebar{padding-inline:13px}.welcome-banner{padding:24px}.welcome-illustration{width:125px;height:125px;flex-basis:125px;font-size:4rem}.dashboard-columns{grid-template-columns:1fr 1fr}}
       @media(max-width:760px){.app-layout{display:block}.sidebar{display:none}.topbar{height:72px;padding:11px 17px}.topbar h1{font-size:1.3rem}.top-pill{display:none}.content-shell{padding:17px 13px 100px}.welcome-banner{padding:20px 18px}.welcome-illustration{width:94px;height:94px;flex-basis:94px;border-width:5px;font-size:3rem}.summary-grid{gap:8px}.summary-card{display:block;padding:12px}.summary-icon{margin-bottom:8px;width:38px;height:38px}.summary-card strong{font-size:1.15rem}.summary-card .summary-label{font-size:.62rem}.summary-card p{font-size:.66rem}.dashboard-columns,.play-layout{grid-template-columns:1fr}.bottom-nav{position:fixed;z-index:20;bottom:0;left:0;right:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px max(8px,env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom));background:#fff9e8;border-top:2px solid var(--gold);box-shadow:0 -5px 18px #57172a18}.bottom-nav .tab{display:block;min-width:0;text-align:center;padding:7px 3px 8px;font-size:.69rem;border:1px solid transparent;border-radius:10px;color:var(--wine)}.bottom-nav .tab .nav-icon{display:block;width:auto;font-size:1.08rem}.bottom-nav .tab.active{background:#ffedbd;border-color:#e2b73d;box-shadow:none}.footer{padding-bottom:5px}}
       @media(max-width:480px){.top-date{display:none}.welcome-banner{align-items:flex-start}.welcome-banner h2{font-size:1.4rem}.welcome-banner p{font-size:.82rem}.welcome-illustration{width:69px;height:69px;flex-basis:69px;font-size:2.2rem;margin-top:20px}.welcome-actions{gap:8px}.welcome-actions button{min-width:0;flex:1;padding:10px}.summary-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.summary-card{padding:10px 8px}.summary-icon{height:32px;width:32px;font-size:1.05rem}.summary-card strong{font-size:1rem}.summary-card p{display:none}.summary-card .summary-label{font-size:.58rem}.panel,.card{padding:15px}.feature-grid,.grid{grid-template-columns:1fr 1fr}.quick-actions{grid-template-columns:1fr 1fr}.metric-line{grid-template-columns:88px 1fr auto;font-size:.76rem}.podium{gap:6px}.podium-item{padding:10px 4px 13px}.podium-item.first{padding-top:20px;padding-bottom:22px}.podium-name{font-size:.78rem}.analysis-modal{padding:7px}.analysis-dialog{max-height:96vh;padding:12px;border-radius:15px}.analysis-dialog-head{top:-12px}}
@@ -110,33 +121,32 @@
                 <div class="ticket-heading"><span>ONE PLAYER · ONE SESSION</span><h2>ADMIT ONE</h2></div>
                 <div class="ticket-content">
                   <div class="ticket-caption">PLAYER ENTRY / CODE NAME</div><h3>Your carnival pass awaits.</h3><p class="small muted">Use a codename so you can find your previous game records later.</p>
-                  <form id="createForm">
-                    <label for="codename">Player codename</label>
-                    <input id="codename" minlength="2" maxlength="24" pattern="[A-Za-z0-9 _\-]+" placeholder="e.g. StarPlayer" required />
-                    <p id="codenameWarning" class="message small hidden" role="status"></p>
-                    <p class="form-help">2–24 characters. Letters, numbers, spaces, underscores, and hyphens only.</p>
-                    <button class="primary full" id="createButton">Create Session</button>
-                  </form>
                   <div id="sessionArea" class="hidden">
                     <div class="card"><div class="label">Session ID</div><div class="sessionid" id="displayId"></div><div class="label">Codename</div><strong id="playerName"></strong></div>
-                    <button class="secondary full" id="copyButton">Copy Session ID</button>
+                    <p id="sessionWarning" class="heads-up hidden" role="status"></p>
                     <p id="queueInfo" class="message small"></p>
-                    <p class="small muted">Start from this page. On the physical board, hold the reset/abandon button for 2 seconds to cancel the active session.</p>
                     <button class="primary full" id="startButton">START THE GAME</button>
                     <button class="secondary full hidden" id="abandonButton">Abandon Session</button>
                     <div class="countdown hidden" id="countdown">5</div>
                     <p id="status" class="message status-message" role="status" aria-live="polite"></p>
-                    <div id="finalResults" class="hidden result-card"></div>
+                    <button class="secondary full hidden" id="viewResultsButton" type="button">View Game Results</button>
                   </div>
+                  <form id="createForm">
+                    <label for="codename">Player codename</label>
+                    <input id="codename" minlength="2" maxlength="24" pattern="[A-Za-z0-9 _\-]+" placeholder="e.g. StarPlayer" required />
+                    <p id="codenameWarning" class="heads-up hidden" role="status"></p>
+                    <p class="form-help">2–24 characters. Letters, numbers, spaces, underscores, and hyphens only.</p>
+                    <button class="primary full" id="createButton">Create Session</button>
+                  </form>
                 </div>
               </section>
-              <aside class="panel play-guide"><div class="guide-art" aria-hidden="true">🎠</div><h2>Before you play</h2><ul><li>Make sure the ESP32 board is powered on and connected.</li><li>Wait for your queue position before starting.</li><li>When the countdown finishes, watch the LEDs carefully.</li><li>Repeat the light pattern using the physical buttons.</li></ul><div class="recommendation">The website starts the session. The board's physical button is for abandoning or resetting a session only.</div></aside>
+              <aside class="panel play-guide"><div class="guide-art" aria-hidden="true">🎠</div><h2>Before you play</h2><ul><li>Make sure the ESP32 board is powered on and connected.</li><li>Wait for your queue position before starting.</li><li>When the countdown finishes, watch the LEDs carefully.</li><li>Repeat the light pattern using the physical buttons.</li></ul></aside>
             </div>
           </section>
 
           <section class="page-view hidden" id="searchView">
-            <div class="page-heading"><h2>Session history</h2><p>Look up previous attempts using the codename entered when the session was created.</p></div>
-            <div class="panel"><h2>Find my sessions</h2><p class="section-intro">Search is case-insensitive. The same codename may belong to different players, because codenames are not unique.</p>
+            <div class="page-heading"><h2>Ticket Stubs</h2><p>Look up previous attempts using the codename entered when the session was created.</p></div>
+            <div class="panel"><div class="title-row"><h2>Find my sessions</h2><button type="button" class="info-btn" aria-label="More information about searching" aria-expanded="false" aria-controls="searchInfo">i</button></div><div class="info-note hidden" id="searchInfo" role="note">Search is case-insensitive. The same codename may belong to different players, because codenames are not unique.</div>
               <form id="searchForm"><label for="searchCodename">Player codename</label><input id="searchCodename" minlength="2" maxlength="24" placeholder="Enter your codename" required /><button class="primary full" id="searchButton">Search Sessions</button></form>
               <p id="searchMessage" class="message" role="status" aria-live="polite"></p><div id="sessionList"></div>
             </div>
@@ -150,7 +160,8 @@
       <nav class="bottom-nav" aria-label="Mobile navigation"><button class="tab active" id="mobileHome" onclick="tab('home')"><span class="nav-icon">⌂</span>Home</button><button class="tab" id="mobilePlay" onclick="tab('start')"><span class="nav-icon">🎟</span>Play</button><button class="tab" id="mobileLeaderboard" onclick="tab('leaderboard')"><span class="nav-icon">🏆</span>Ranks</button><button class="tab" id="mobileHistory" onclick="tab('search')"><span class="nav-icon">📜</span>History</button></nav>
     </div>
 
-    <div id="analysisModal" class="analysis-modal hidden" role="dialog" aria-modal="true" aria-labelledby="analysisTitle"><div class="analysis-dialog"><div class="analysis-dialog-head"><h2 id="analysisTitle">Performance Analysis</h2><button class="analysis-close" id="closeAnalysis" type="button" aria-label="Close performance analysis">✕ Close</button></div><div id="performanceView"><p class="muted">Select a completed session to view its analysis.</p></div></div></div>
+    <div id="resultsModal" class="analysis-modal results-modal hidden" role="dialog" aria-modal="true" aria-labelledby="resultsTitle"><div class="analysis-dialog results-dialog"><div class="analysis-dialog-head"><h2 id="resultsTitle">Game Results</h2><button class="analysis-close" id="closeResults" type="button" aria-label="Close game results">✕</button></div><div id="resultsContent"></div></div></div>
+    <div id="analysisModal" class="analysis-modal hidden" role="dialog" aria-modal="true" aria-labelledby="analysisTitle"><div class="analysis-dialog"><div class="analysis-dialog-head"><h2 id="analysisTitle">Performance Analysis</h2><button class="analysis-close" id="closeAnalysis" type="button" aria-label="Close performance analysis">✕</button></div><div id="performanceView"><p class="muted">Select a completed session to view its analysis.</p></div></div></div>
     <script>
       const $ = (id) => document.getElementById(id);
       const STORAGE_KEY = "lmc_active_session_id";
@@ -160,6 +171,29 @@
       let countdownTarget = null;
       let duplicateCount = 0;
       let duplicateCheckedFor = "";
+      let lastCompleted = null;
+      let resultsShownFor = null;
+      let sessionWarningText = "";
+      let infoCounter = 0;
+
+      // Small "i" button that reveals an explanation inline (keeps screens uncluttered).
+      function infoTip(text) {
+        const id = `info${++infoCounter}`;
+        return `<button type="button" class="info-btn" aria-label="More information" aria-expanded="false" aria-controls="${id}">i</button><span class="info-note hidden" id="${id}" role="note">${esc(text)}</span>`;
+      }
+      function sectionHead(title, text) {
+        if (!text) return `<div class="title-row section-heading"><h2>${esc(title)}</h2></div>`;
+        const id = `info${++infoCounter}`;
+        return `<div class="title-row section-heading"><h2>${esc(title)}</h2><button type="button" class="info-btn" aria-label="More information about ${esc(title)}" aria-expanded="false" aria-controls="${id}">i</button></div><div class="info-note hidden" id="${id}" role="note">${esc(text)}</div>`;
+      }
+      document.addEventListener("click", (event) => {
+        const btn = event.target.closest(".info-btn");
+        if (!btn) return;
+        const note = $(btn.getAttribute("aria-controls"));
+        if (!note) return;
+        const open = note.classList.toggle("hidden") === false;
+        btn.setAttribute("aria-expanded", String(open));
+      });
 
       async function api(path, opts = {}) {
         const r = await fetch(path, {
@@ -238,6 +272,12 @@
           sid = d.session_id;
           localStorage.setItem(STORAGE_KEY, sid);
           stopTimers();
+          resetResultsUI();
+          sessionWarningText = found > 0
+            ? `Heads up: "${name}" has ${found} previous session(s). Codenames are not unique, so these may belong to another player.`
+            : "";
+          $("sessionWarning").textContent = sessionWarningText;
+          $("codenameWarning").classList.add("hidden");
           renderSession(d);
           $("status").textContent = "Session created. Check your queue position and wait for your turn.";
           startPolling();
@@ -245,15 +285,6 @@
           alert(err.message);
         } finally {
           $("createButton").disabled = false;
-        }
-      };
-
-      $("copyButton").onclick = async () => {
-        try {
-          await navigator.clipboard.writeText($("displayId").textContent);
-          $("status").textContent = "Session ID copied.";
-        } catch {
-          $("status").textContent = "Select and copy the session ID shown above.";
         }
       };
 
@@ -323,6 +354,10 @@
         $("displayId").textContent = s.display_id || "Session";
         $("playerName").textContent = s.codename || "";
         $("queueInfo").textContent = "";
+        // Hide the create form while a session is still unfinished; bring it back once it ends.
+        const sessionActive = ["waiting", "countdown", "playing"].includes(s.status);
+        $("createForm").classList.toggle("hidden", sessionActive);
+        $("sessionWarning").classList.toggle("hidden", !(sessionActive && sessionWarningText));
         if (s.status === "waiting") {
           if (s.queue_position) {
             $("queueInfo").textContent = `Queue position: ${s.queue_position} of ${s.waiting_count}. Maximum ${s.max_waiting || 3} waiting players.`;
@@ -332,7 +367,7 @@
           const canStart = Boolean(s.is_next);
           $("startButton").classList.remove("hidden");
           $("startButton").disabled = !canStart;
-          $("startButton").textContent = canStart ? "START GAME ON THIS PHONE" : "WAIT FOR YOUR TURN";
+          $("startButton").textContent = canStart ? "START" : "WAIT FOR YOUR TURN";
           $("abandonButton").classList.remove("hidden");
           $("abandonButton").disabled = false;
           $("countdown").classList.add("hidden");
@@ -396,17 +431,46 @@
 
       function showFinal(s) {
         const r = s.result;
+        lastCompleted = s;
         $("startButton").classList.add("hidden");
         $("abandonButton").classList.add("hidden");
         $("countdown").classList.add("hidden");
         $("status").textContent = "Game complete! Your results have been saved.";
-        $("finalResults").classList.remove("hidden");
-        $("finalResults").innerHTML =
-          `<h2>Game Results</h2><div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div><div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><button class="secondary full" id="resultAnalysis">View Performance Analysis</button>`;
-        $("resultAnalysis").onclick = () => {
-          showPerformance(s);
-        };
+        $("viewResultsButton").classList.remove("hidden");
+        $("resultsContent").innerHTML =
+          `<div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div><div class="stat"><span class="label">Player Rank</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><button class="secondary full" id="resultAnalysis" type="button">View Performance Analysis</button>`;
+        $("resultAnalysis").onclick = () => showPerformance(s);
+        // Pop the results up once per finished game; afterwards the player reopens them with the button.
+        if (resultsShownFor !== s.session_id) {
+          resultsShownFor = s.session_id;
+          openResultsModal();
+        }
       }
+      function resetResultsUI() {
+        lastCompleted = null;
+        resultsShownFor = null;
+        $("viewResultsButton").classList.add("hidden");
+        $("resultsContent").innerHTML = "";
+        closeResultsModal();
+        closeAnalysisModal();
+      }
+      function syncScrollLock() {
+        const anyOpen = ["resultsModal", "analysisModal"].some((id) => !$(id).classList.contains("hidden"));
+        document.body.style.overflow = anyOpen ? "hidden" : "";
+      }
+      function openResultsModal() {
+        if (!lastCompleted) return;
+        $("resultsModal").classList.remove("hidden");
+        syncScrollLock();
+        $("closeResults").focus();
+      }
+      function closeResultsModal() {
+        $("resultsModal").classList.add("hidden");
+        syncScrollLock();
+      }
+      $("viewResultsButton").onclick = openResultsModal;
+      $("closeResults").addEventListener("click", closeResultsModal);
+      $("resultsModal").addEventListener("click", (event) => { if (event.target === $("resultsModal")) closeResultsModal(); });
 
       $("searchForm").onsubmit = async (e) => {
         e.preventDefault();
@@ -422,8 +486,8 @@
             : `No sessions found for "${d.codename}".`;
           for (const s of d.sessions) {
             const card = document.createElement("article");
-            card.className = "card";
-            card.innerHTML = `<div class="sessionid">${esc(s.display_id)}</div><p class="muted small">${esc(new Date(s.created_at).toLocaleString())} · <span class="pill">${esc(s.status)}</span></p><div class="grid"><div class="stat"><span class="label">Points</span><strong>${s.score == null ? "—" : Number(s.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${s.highest_level ?? "—"}</strong></div></div><button class="primary full">View Session</button>`;
+            card.className = "stub";
+            card.innerHTML = `<div class="stub-main"><div class="stub-caption">ADMIT ONE · SESSION</div><div class="sessionid">${esc(s.display_id)}</div><p class="muted small">${esc(new Date(s.created_at).toLocaleString())} · <span class="pill">${esc(s.status)}</span></p><div class="grid"><div class="stat"><span class="label">Points</span><strong>${s.score == null ? "—" : Number(s.score).toLocaleString()}</strong></div><div class="stat"><span class="label">Highest Level</span><strong>${s.highest_level ?? "—"}</strong></div></div></div><div class="stub-side"><div class="stub-admit">🎟<br>Your stub</div><button class="primary" type="button">View Session</button></div>`;
             card.querySelector("button").onclick = () => loadPerformance(s.session_id);
             $("sessionList").appendChild(card);
           }
@@ -444,16 +508,20 @@
       }
       function openAnalysisModal() {
         $("analysisModal").classList.remove("hidden");
-        document.body.style.overflow = "hidden";
+        syncScrollLock();
         $("closeAnalysis").focus();
       }
       function closeAnalysisModal() {
         $("analysisModal").classList.add("hidden");
-        document.body.style.overflow = "";
+        syncScrollLock();
       }
       $("closeAnalysis").addEventListener("click", closeAnalysisModal);
       $("analysisModal").addEventListener("click", (event) => { if (event.target === $("analysisModal")) closeAnalysisModal(); });
-      document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("analysisModal").classList.contains("hidden")) closeAnalysisModal(); });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (!$("analysisModal").classList.contains("hidden")) closeAnalysisModal();
+        else if (!$("resultsModal").classList.contains("hidden")) closeResultsModal();
+      });
       function showPerformance(s) {
         openAnalysisModal();
         const el = $("performanceView");
@@ -466,7 +534,7 @@
         const recs = Array.isArray(a.recommendations) ? a.recommendations : [];
         const levels = Array.isArray(r.round_data) ? r.round_data : [];
         const perLevelAnalysis = Array.isArray(a.per_level_analysis) ? a.per_level_analysis : [];
-        const levelCards = levels.map((x) => {
+        const levelCards = levels.map((x, idx) => {
           const details = Array.isArray(x.incorrect_press_details) ? x.incorrect_press_details : [];
           const attempts = Number(x.sequences_attempted || 0);
           const accuracy = Math.max(0, Math.min(100, Number(x.accuracy || 0)));
@@ -481,7 +549,8 @@
           }).join("") : "No incorrect press positions recorded.";
           const analysis = perLevelAnalysis.find(v => Number(v.level) === Number(x.level));
           return `<article class="level-card">
-            <div class="level-top"><span class="level-name">Level ${esc(x.level)}</span><span class="pill">${esc(analysis?.classification || "Unclassified")}</span></div>
+            <button type="button" class="level-toggle" aria-expanded="false" aria-controls="levelBody${idx}"><span class="level-name">Level ${esc(x.level)}</span><span class="level-toggle-right"><span class="pill">${esc(analysis?.classification || "Unclassified")}</span><span class="chev" aria-hidden="true">▸</span></span></button>
+            <div class="level-body hidden" id="levelBody${idx}">
             <div class="metric-line"><span>Accuracy</span><div class="bar-track"><div class="bar-fill" style="width:${accuracy}%"></div></div><strong>${accuracy.toFixed(1)}%</strong></div>
             <div class="metric-line"><span>Avg. sequence time</span><div class="bar-track"><div class="bar-fill time" style="width:${avgMs == null ? 0 : Math.min(100, avgMs / maxMs * 100)}%"></div></div><strong>${avgMs == null ? "—" : (avgMs / 1000).toFixed(1) + "s"}</strong></div>
             <div class="level-meta">
@@ -491,34 +560,42 @@
               <div class="mini-stat"><span class="small muted">Fastest / slowest</span><strong>${x.fastest_response_time_ms == null ? "—" : (Number(x.fastest_response_time_ms)/1000).toFixed(1)+"s"} / ${x.slowest_response_time_ms == null ? "—" : (Number(x.slowest_response_time_ms)/1000).toFixed(1)+"s"}</strong></div>
             </div>
             <details class="details"><summary>Incorrect press positions (${details.length})</summary>${detailText}</details>
+            </div>
           </article>`;
         }).join("");
         const classifications = perLevelAnalysis.map((x) =>
           `<span class="pill">L${esc(x.level)}: ${esc(x.classification)}${x.data_sufficient ? "" : " · insufficient data"}</span>`
         ).join(" ");
+        const reasonText = a.reason || (a.data_status === "insufficient_per_level_data" ? "Per-level telemetry is missing; no difficulty adjustment was inferred." : "");
+        const confidenceText = "One completed sequence allows a provisional assessment; two or more sequences provide a more reliable pattern. " + (a.confidence_note || "");
         el.innerHTML = `<div class="card">
           <div class="sessionid">${esc(s.display_id)}</div>
           <p class="muted">Player: ${esc(s.codename)}</p>
           <div class="grid">
-            <div class="stat"><span class="label">Ranking</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div>
+            <div class="stat"><span class="label">Player Rank</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div>
             <div class="stat"><span class="label">Points</span><strong>${Number(r.score).toLocaleString()}</strong></div>
             <div class="stat"><span class="label">Highest Level</span><strong>${r.highest_level}</strong></div>
             <div class="stat"><span class="label">Overall Accuracy</span><strong>${Number(r.accuracy).toFixed(1)}%</strong></div>
             <div class="stat"><span class="label">Failed Sequences</span><strong>${r.mistakes}</strong></div>
             <div class="stat"><span class="label">Avg. Button Response</span><strong>${r.avg_response_time_ms == null ? "—" : Number(r.avg_response_time_ms).toFixed(0) + " ms"}</strong></div>
           </div>
-          <h2 class="section-heading">Intelligent System Analysis</h2>
+          ${sectionHead("Intelligent System Analysis", reasonText)}
           <p>Latest level classification: <strong>${esc(a.classification || "Not available")}</strong></p>
           <p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p>
-          <p class="small muted">${esc(a.reason || (a.data_status === "insufficient_per_level_data" ? "Per-level telemetry is missing; no difficulty adjustment was inferred." : ""))}</p>
           ${classifications ? `<p class="small">${classifications}</p>` : ""}
-          <h2 class="section-heading">Per-Level Performance</h2>
-          <p class="small muted">Each level shows cumulative sequence attempts, failed sequences, individual incorrect presses, accuracy, response-time summaries, and the exact position of each incorrect press.</p>
+          ${sectionHead("Per-Level Performance", "Tap a level to see its cumulative sequence attempts, failed sequences, individual incorrect presses, accuracy, response-time summaries, and the exact position of each incorrect press.")}
           ${levels.length ? `<div class="level-chart">${levelCards}</div>` : `<p>Per-level summaries were not included in this result.</p>`}
           <h2 class="section-heading">Recommendations</h2>
           ${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}
-          <p class="small muted">IS confidence: ${esc(a.confidence || "not available")}. One completed sequence allows a provisional assessment; two or more sequences provide a more reliable pattern. ${esc(a.confidence_note || "")}</p>
+          <p class="small muted">IS confidence: ${esc(a.confidence || "not available")}${infoTip(confidenceText.trim())}</p>
         </div>`;
+        el.querySelectorAll(".level-toggle").forEach((btn) => {
+          btn.onclick = () => {
+            const body = $(btn.getAttribute("aria-controls"));
+            const open = body.classList.toggle("hidden") === false;
+            btn.setAttribute("aria-expanded", String(open));
+          };
+        });
       }
 
       async function restoreSavedSession() {
@@ -564,7 +641,7 @@
         if (!rows.length) { $("leaderboardContent").innerHTML = '<p class="muted">No completed results found yet.</p>'; return; }
         const top = rows.slice(0,3);
         const podiumOrder = top.length >= 3 ? [{x:top[1],rank:2,medal:'🥈',place:'second'},{x:top[0],rank:1,medal:'🥇',place:'first'},{x:top[2],rank:3,medal:'🥉',place:'third'}] : top.map((x,i)=>({x,rank:i+1,medal:['🥇','🥈','🥉'][i],place:i===0?'first':i===1?'second':'third'}));
-        const podium = top.length ? `<div class="podium" aria-label="Top three leaderboard podium">${podiumOrder.map(({x,rank,medal,place})=>`<div class="podium-item ${place}"><div class="podium-rank">${medal}</div><span class="podium-name">${esc(x.codename)}</span><div class="podium-score">${Number(x.score).toLocaleString()} pts</div><div class="small muted">Level ${esc(x.highest_level)}</div><div class="podium-base">${rank}${rank===1?'st':rank===2?'nd':'rd'} Place</div></div>`).join('')}</div>` : '';
+        const podium = (top.length && !q) ? `<div class="podium" aria-label="Top three leaderboard podium">${podiumOrder.map(({x,rank,medal,place})=>`<div class="podium-item ${place}"><div class="podium-rank">${medal}</div><span class="podium-name">${esc(x.codename)}</span><div class="podium-score">${Number(x.score).toLocaleString()} pts</div><div class="small muted">Level ${esc(x.highest_level)}</div><div class="podium-base">${rank}${rank===1?'st':rank===2?'nd':'rd'} Place</div></div>`).join('')}</div>` : '';
         $("leaderboardContent").innerHTML = podium + `<div class="table-wrap"><table><thead><tr><th>Rank</th><th>Player</th><th>Level</th><th>Score</th><th>Accuracy</th><th>Date</th></tr></thead><tbody>${rows.map((x,i)=>`<tr><td>#${esc(x.rank ?? (i+1))}</td><td>${esc(x.codename)}</td><td>${esc(x.highest_level)}</td><td>${Number(x.score).toLocaleString()}</td><td>${Number(x.accuracy).toFixed(1)}%</td><td>${esc(x.saved_at ? new Date(x.saved_at).toLocaleDateString() : '—')}</td></tr>`).join('')}</tbody></table></div>`;
       }
       $("leaderboardSearch").addEventListener('input', renderLeaderboard);
