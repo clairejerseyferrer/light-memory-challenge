@@ -42,13 +42,81 @@ def dt_utc(value):
 def readable_id(number: int) -> str:
     return f"Session #{int(number):03d}"
 
+def build_leaderboard_entries(client: Client):
+    """Build the canonical leaderboard: one personal-best result per codename."""
+    sessions_q = (client.table("game_sessions")
+        .select("id,codename,completed_at")
+        .eq("status", "completed")
+        .execute())
+    results_q = (client.table("game_results")
+        .select("session_id,score,highest_level,accuracy,saved_at")
+        .execute())
+
+    sessions_by_id = {row["id"]: row for row in (sessions_q.data or [])}
+    best_by_codename: dict[str, dict[str, Any]] = {}
+
+    def rank_key(row):
+        # This is the same order used for every displayed rank.
+        return (
+            -row["highest_level"],
+            -row["score"],
+            row["saved_at"] or "9999",
+            row["session_id"] or "",
+        )
+
+    for result in results_q.data or []:
+        session = sessions_by_id.get(result.get("session_id"))
+        if not session:
+            continue
+        codename = session.get("codename") or "Unknown"
+        key = codename.strip().casefold()
+        candidate = {
+            "codename": codename,
+            "session_id": result.get("session_id"),
+            "score": int(result.get("score") or 0),
+            "highest_level": int(result.get("highest_level") or 0),
+            "accuracy": float(result.get("accuracy") or 0),
+            "saved_at": result.get("saved_at"),
+        }
+        current = best_by_codename.get(key)
+        if current is None or rank_key(candidate) < rank_key(current):
+            best_by_codename[key] = candidate
+
+    entries = sorted(best_by_codename.values(), key=rank_key)
+    for index, entry in enumerate(entries, start=1):
+        entry["rank"] = index
+    return entries
+
+
 def get_result(client: Client, sid: str):
     q = client.table("game_results").select("*").eq("session_id", sid).limit(1).execute()
-    if not q.data: return None
+    if not q.data:
+        return None
+
     result = q.data[0]
-    all_results = client.table("game_results").select("session_id,score,highest_level,saved_at").order("score", desc=True).order("highest_level", desc=True).order("saved_at").execute()
-    result["ranking"] = next((i for i, row in enumerate(all_results.data or [], 1) if row["session_id"] == sid), None)
-    result["ranking_basis"] = "Score descending, then highest level descending, then earliest saved result."
+    session_q = (client.table("game_sessions")
+        .select("codename")
+        .eq("id", sid)
+        .limit(1)
+        .execute())
+    codename = (
+        (session_q.data[0].get("codename") or "Unknown").strip().casefold()
+        if session_q.data else None
+    )
+
+    # Match the leaderboard's one-personal-best-per-codename ranking rather
+    # than ranking every raw game_results row independently.
+    entries = build_leaderboard_entries(client)
+    player_entry = next(
+        (entry for entry in entries
+         if entry["codename"].strip().casefold() == codename),
+        None,
+    )
+    result["ranking"] = player_entry["rank"] if player_entry else None
+    result["ranking_basis"] = (
+        "Highest level descending, score descending, then earliest saved result; "
+        "one personal-best entry per codename."
+    )
     return result
 
 def queue_state(client: Client, device_id: str, session_id: str | None = None):
@@ -315,9 +383,9 @@ def device_command(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_t
         return {"command": "NONE", "abandon_session_id": target["id"] if target else None,
                 "abandon_display_id": readable_id(target["session_number"]) if target else None,
                 "abandon_status": target["status"] if target else None}
-    remaining_seconds = max(
-    0,
-    int((start_at - datetime.now(timezone.utc)).total_seconds() + 0.999),
+    countdown_remaining_ms = max(
+        0,
+        int((start_at - datetime.now(timezone.utc)).total_seconds() * 1000),
     )
 
     return {
@@ -328,7 +396,7 @@ def device_command(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_t
         "device_id": row["device_id"],
         "start_at": start_at.isoformat(),
         "start_at_epoch": int(start_at.timestamp()),
-        "countdown_seconds": remaining_seconds,
+        "countdown_remaining_ms": countdown_remaining_ms,
         "abandon_session_id": target["id"] if target else None,
         "abandon_display_id": readable_id(target["session_number"]) if target else None,
         "abandon_status": target["status"] if target else None,
@@ -358,51 +426,17 @@ def leaderboard(limit: int = Query(default=100, ge=1, le=500)):
     """Return each codename's personal best; codenames are not authenticated identities."""
     client = db()
     try:
-        sessions_q = (client.table("game_sessions")
-            .select("id,codename,completed_at")
-            .eq("status", "completed")
-            .execute())
-        results_q = (client.table("game_results")
-            .select("session_id,score,highest_level,accuracy,saved_at")
-            .execute())
+        entries = build_leaderboard_entries(client)
     except Exception:
         raise HTTPException(500, "Could not retrieve leaderboard data.")
 
-    sessions_by_id = {row["id"]: row for row in (sessions_q.data or [])}
-    best_by_codename: dict[str, dict[str, Any]] = {}
-    for result in results_q.data or []:
-        session = sessions_by_id.get(result.get("session_id"))
-        if not session:
-            continue
-        codename = session.get("codename") or "Unknown"
-        key = codename.strip().casefold()
-        candidate = {
-            "codename": codename,
-            "session_id": result.get("session_id"),
-            "score": int(result.get("score") or 0),
-            "highest_level": int(result.get("highest_level") or 0),
-            "accuracy": float(result.get("accuracy") or 0),
-            "saved_at": result.get("saved_at"),
-        }
-        current = best_by_codename.get(key)
-        def rank_key(row):
-            # Higher level, then higher score, then earliest saved result.
-            return (-row["highest_level"], -row["score"], row["saved_at"] or "9999")
-        if current is None or rank_key(candidate) < rank_key(current):
-            best_by_codename[key] = candidate
-
-    entries = sorted(best_by_codename.values(), key=lambda row: (
-        -row["highest_level"], -row["score"], row["saved_at"] or "9999"
-    ))[:limit]
-    for index, entry in enumerate(entries, start=1):
-        entry["rank"] = index
+    entries = entries[:limit]
     return {
         "entries": entries,
         "count": len(entries),
         "ranking_basis": "Highest level descending, score descending, then earliest saved result.",
         "identity_note": "One personal-best entry per codename; codenames are not unique or authenticated identities.",
     }
-
 
 @app.get("/api/players/search")
 def search_player(codename: str = Query(min_length=2, max_length=24)):

@@ -286,6 +286,9 @@
             body: "{}",
           });
           $("status").textContent = "Countdown scheduled. Waiting for the physical board…";
+          // The API returns the remaining duration calculated by the server.
+          // Use performance.now() inside beginCountdown(), avoiding dependence
+          // on the phone's wall clock or time-zone configuration.
           beginCountdown(d.countdown_remaining_ms ?? 5000);
           await pollSession();
         } catch (err) {

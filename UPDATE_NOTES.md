@@ -156,3 +156,13 @@ No database migration is required. Flash the updated firmware to the ESP32; the 
   or its NTP clock makes the remaining time implausible, it falls back to a
   complete local countdown instead of flashing `5` and immediately showing `GO!`.
 - Physical abandon checks remain active throughout the countdown.
+
+
+## Countdown synchronization, TFT score order, and ranking consistency
+- The device command now returns countdown remaining time in milliseconds.
+- The ESP32 counts down to the backend's scheduled deadline instead of starting
+  a new full countdown when its polling request arrives.
+- The phone countdown derives its target from the same server `start_at` value.
+- TFT round feedback now labels and displays LEVEL SCORE before TOTAL SCORE.
+- Game-result ranking and leaderboard ranking now share one canonical
+  personal-best-per-codename calculation and identical tie-breaking rules.

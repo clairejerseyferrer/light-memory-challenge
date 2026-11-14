@@ -217,6 +217,7 @@ int updateOnCorrect();
 void updateOnMistake(bool wasTimeout);
 void drawCenteredText(const String &text, int y, uint8_t size, uint16_t color);
 void showScoreboard(const char* headline, int roundPoints);
+void showLevelRevertedAnimation(int newLevel);
 void endGame();
 void showFinalScreen();
 void showCountdown(long n);
@@ -498,21 +499,10 @@ void clearCurrentSession() {
 // TFT PRE-GAME COUNTDOWN
 // =================================================================
 bool runCountdown() {
-  // Use the server's remaining time only when it is plausible. The board can
-  // receive START after the scheduled deadline (for example, after a delayed
-  // poll or a clock/NTP mismatch). In that case, do NOT jump straight to GO:
-  // run a complete local five-second countdown so the TFT never flashes 5
-  // and immediately replaces it with GO!.
-  long remaining = -1;
-  if (timeIsSynced() && currentStartAtEpoch > 0) {
-    remaining = currentStartAtEpoch - (long)time(nullptr);
-  }
-
-  int secondsToShow = (remaining >= 1 && remaining <= 5)
-                        ? (int)remaining
-                        : 5;
-
-  for (int s = secondsToShow; s >= 1; --s) {
+  // Independent ESP32 countdown. It intentionally does not follow the
+  // phone/server timer; starting at 4 is a visual offset to make them appear
+  // closer together without depending on clock synchronization.
+  for (int s = 4; s >= 1; --s) {
     if (checkPhysicalAbandon()) return false;
     showCountdown(s);
     playTone(1000, 120);
@@ -672,15 +662,24 @@ void checkInput() {
   addRoundLog(inputCorrect, inputTimedOut, incorrectPositionMask, pressedAt, expectedAt);   // before level changes
 
   int pointsEarned = 0;
+  const int levelBeforeAttempt = level;
   if (inputCorrect) {
     pointsEarned = updateOnCorrect();
   } else {
     updateOnMistake(inputTimedOut);
   }
+  const bool levelWasReverted = level < levelBeforeAttempt;
 
   const char* headline = inputCorrect ? "CORRECT!" : (inputTimedOut ? "TIME'S UP!" : "WRONG PATTERN");
   showScoreboard(headline, pointsEarned);
-  delay(1250);
+  if (levelWasReverted) {
+    delay(650); // let the player read the updated score first
+    showLevelRevertedAnimation(level);
+    showScoreboard(headline, pointsEarned); // leave the score screen as the final view
+    delay(600);
+  } else {
+    delay(1250);
+  }
 }
 
 void addRoundLog(bool correct, bool timedOut, uint32_t incorrectPositionMask,
@@ -1238,21 +1237,53 @@ void showTurn(long secs, bool grace) {
   // TFT writes are sent immediately; no display.display() call is needed.
 }
 
-// Score and round feedback share one screen so the updated total is easy
-// to read from a distance on the small 1.8-inch TFT.
+// Show the points earned for this completed level first, then the
+// accumulated total. Keeping both values explicitly labeled avoids making
+// the total look like the immediate level reward.
 void showScoreboard(const char* headline, int roundPoints) {
   display.fillScreen(ST77XX_BLACK);
   uint16_t headlineColor = (roundPoints > 0) ? ST77XX_GREEN : ST77XX_RED;
-  drawCenteredText(String(headline), 4, 1, headlineColor);
-  if (roundPoints > 0) drawCenteredText("+" + String(roundPoints) + " POINTS", 18, 1, ST77XX_YELLOW);
-  drawCenteredText("TOTAL SCORE", 37, 1, ST77XX_CYAN);
-  drawCenteredText(String(score), 51, 4, ST77XX_YELLOW);
+  drawCenteredText(String(headline), 2, 1, headlineColor);
+
+  drawCenteredText("LEVEL SCORE", 18, 1, ST77XX_CYAN);
+  drawCenteredText((roundPoints > 0 ? "+" : "") + String(roundPoints), 30, 2, ST77XX_YELLOW);
+
+  drawCenteredText("TOTAL SCORE", 56, 1, ST77XX_CYAN);
+  drawCenteredText(String(score), 68, 3, ST77XX_YELLOW);
 
   String progress = "LEVEL " + String(level) + "   LIVES " + String(lives);
-  drawCenteredText(progress, 91, 1, ST77XX_WHITE);
-  if (allLevelsCleared) drawCenteredText("ALL LEVELS CLEARED!", 108, 1, ST77XX_GREEN);
-  else if (lives <= 0) drawCenteredText("GAME FINISHED", 108, 1, ST77XX_RED);
-  else drawCenteredText(roundPoints > 0 ? "NEXT LEVEL!" : "TRY THE LEVEL AGAIN", 108, 1, ST77XX_CYAN);
+  drawCenteredText(progress, 101, 1, ST77XX_WHITE);
+  if (allLevelsCleared) drawCenteredText("ALL LEVELS CLEARED!", 116, 1, ST77XX_GREEN);
+  else if (lives <= 0) drawCenteredText("GAME FINISHED", 116, 1, ST77XX_RED);
+  else drawCenteredText(roundPoints > 0 ? "NEXT LEVEL!" : "TRY THE LEVEL AGAIN", 116, 1, ST77XX_CYAN);
+}
+
+
+// A short, playful clown-style warning makes an adaptive level drop obvious.
+// The display returns to the normal score screen immediately afterward.
+void showLevelRevertedAnimation(int newLevel) {
+  display.fillScreen(ST77XX_BLACK);
+  drawCenteredText("OOPS...!", 3, 2, ST77XX_RED);
+
+  // Clown hair and face
+  display.fillCircle(39, 43, 10, ST77XX_YELLOW);
+  display.fillCircle(121, 43, 10, ST77XX_YELLOW);
+  display.fillCircle(80, 48, 29, ST77XX_WHITE);
+  display.fillCircle(63, 43, 5, ST77XX_BLUE);
+  display.fillCircle(97, 43, 5, ST77XX_BLUE);
+  display.fillCircle(80, 56, 6, ST77XX_RED);
+  display.drawLine(66, 68, 94, 68, ST77XX_RED);
+  display.drawLine(66, 68, 72, 75, ST77XX_RED);
+  display.drawLine(94, 68, 88, 75, ST77XX_RED);
+  display.fillCircle(53, 57, 5, ST77XX_MAGENTA);
+  display.fillCircle(107, 57, 5, ST77XX_MAGENTA);
+
+  drawCenteredText("LEVEL REVERTED!", 87, 1, ST77XX_YELLOW);
+  drawCenteredText("BACK TO LEVEL " + String(newLevel), 103, 1, ST77XX_CYAN);
+  playTone(420, 120);
+  delay(120);
+  playTone(320, 180);
+  delay(1050);
 }
 
 // Seconds left in the base time; after that, seconds left in the grace period.
