@@ -28,6 +28,7 @@
       .level-card{padding:0;overflow:hidden}.level-toggle{display:flex;width:100%;align-items:center;justify-content:space-between;gap:10px;border-radius:0;background:#fff4d5;color:var(--wine);padding:13px 14px;text-align:left;box-shadow:none}.level-toggle:hover{transform:none}.level-toggle[aria-expanded="true"]{background:#ffe9a8}.level-toggle-right{display:flex;align-items:center;gap:10px;min-width:0}.chev{display:inline-block;transition:transform .15s}.level-toggle[aria-expanded="true"] .chev{transform:rotate(90deg)}.level-body{padding:13px;border-top:1px solid var(--line)}
       .stub{position:relative;display:grid;grid-template-columns:minmax(0,1fr) 160px;margin:0 0 16px;background:linear-gradient(120deg,#fff6d2,#ffe9a3);border:2px solid #d69e1a;border-radius:14px;box-shadow:var(--shadow);overflow:hidden}.stub-main{padding:15px 18px;min-width:0}.stub-caption{font-size:.68rem;font-weight:900;letter-spacing:.16em;color:#a15e40}.stub .sessionid{font:1.25rem 'Rye',Georgia,serif;margin:2px 0 0}.stub .grid{margin-top:10px}.stub .stat{background:#fffaf0}
       .stub-side{position:relative;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;padding:15px 14px;border-left:3px dashed #c98f12;background:repeating-linear-gradient(135deg,#f9d86a 0 8px,#fbe28c 8px 16px);text-align:center}.stub-side:before,.stub-side:after{content:"";position:absolute;left:-12px;width:22px;height:22px;border-radius:50%;background:var(--paper);border:2px solid #d69e1a}.stub-side:before{top:-12px}.stub-side:after{bottom:-12px}.stub-admit{font:.95rem 'Rye',Georgia,serif;color:var(--wine);line-height:1.15}.stub-side button{width:100%;margin:0}
+      .pill.provisional{background:#ffe0b3;color:#7a3b00}.insight{padding:11px 12px;border-left:3px solid var(--gold);background:#fff2c9;margin:8px 0;border-radius:0 10px 10px 0}.insight.good{border-left-color:var(--green);background:#e9f5e8}.insight.warn{border-left-color:#c2410c;background:#ffe9d2}.insight strong{display:block}.insight .why{margin-top:4px;font-size:.82rem;color:#6f5448}.adjust-note{padding:11px 13px;margin:12px 0 0;border:2px dashed #c98f12;border-radius:12px;background:#fff0b8;font-size:.88rem;font-weight:600}.standing-note{margin:10px 0 0}
       @media(max-width:560px){.stub{grid-template-columns:1fr}.stub-side{border-left:0;border-top:3px dashed #c98f12;flex-direction:row;justify-content:space-between;padding:14px 16px}.stub-side:before,.stub-side:after{top:-12px;bottom:auto}.stub-side:before{left:-12px}.stub-side:after{left:auto;right:-12px}.stub-side button{width:auto;flex:0 0 auto}.stub-admit{text-align:left}}
       @media(max-width:1040px){.app-layout{grid-template-columns:220px minmax(0,1fr)}.sidebar{padding-inline:13px}.welcome-banner{padding:24px}.welcome-illustration{width:125px;height:125px;flex-basis:125px;font-size:4rem}.dashboard-columns{grid-template-columns:1fr 1fr}}
       @media(max-width:760px){.app-layout{display:block}.sidebar{display:none}.topbar{height:72px;padding:11px 17px}.topbar h1{font-size:1.3rem}.top-pill{display:none}.content-shell{padding:17px 13px 100px}.welcome-banner{padding:20px 18px}.welcome-illustration{width:94px;height:94px;flex-basis:94px;border-width:5px;font-size:3rem}.summary-grid{gap:8px}.summary-card{display:block;padding:12px}.summary-icon{margin-bottom:8px;width:38px;height:38px}.summary-card strong{font-size:1.15rem}.summary-card .summary-label{font-size:.62rem}.summary-card p{font-size:.66rem}.dashboard-columns,.play-layout{grid-template-columns:1fr}.bottom-nav{position:fixed;z-index:20;bottom:0;left:0;right:0;display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding:8px max(8px,env(safe-area-inset-left)) calc(8px + env(safe-area-inset-bottom));background:#fff9e8;border-top:2px solid var(--gold);box-shadow:0 -5px 18px #57172a18}.bottom-nav .tab{display:block;min-width:0;text-align:center;padding:7px 3px 8px;font-size:.69rem;border:1px solid transparent;border-radius:10px;color:var(--wine)}.bottom-nav .tab .nav-icon{display:block;width:auto;font-size:1.08rem}.bottom-nav .tab.active{background:#ffedbd;border-color:#e2b73d;box-shadow:none}.footer{padding-bottom:5px}}
@@ -175,6 +176,7 @@
       let resultsShownFor = null;
       let sessionWarningText = "";
       let infoCounter = 0;
+      let pendingCreate = { name: null, key: null };
 
       // Small "i" button that reveals an explanation inline (keeps screens uncluttered).
       function infoTip(text) {
@@ -265,10 +267,15 @@
           if (found > 0 && !window.confirm(
             `The codename "${name}" has ${found} previous session(s). They may belong to another player. Do you still want to use this codename?`
           )) return;
+          // One key per attempt, reused if the same attempt is retried, so a repeated
+          // POST can never create a second session.
+          if (pendingCreate.name !== name) pendingCreate = { name, key: uuid4() };
           const d = await api("/api/sessions", {
             method: "POST",
+            headers: { "Idempotency-Key": pendingCreate.key },
             body: JSON.stringify({ codename: name }),
           });
+          pendingCreate = { name: null, key: null };
           sid = d.session_id;
           localStorage.setItem(STORAGE_KEY, sid);
           stopTimers();
@@ -429,6 +436,26 @@
         poll = setInterval(pollSession, 1500);
       }
 
+      function standingNote(r) {
+        const lb = r.leaderboard;
+        if (!lb) return "This codename is not on the leaderboard.";
+        if (lb.is_this_session) return "This game is your codename's current leaderboard entry.";
+        return `Leaderboard standing reflects this codename's best entry (Level ${lb.entry_highest_level}, ${Number(lb.entry_score).toLocaleString()} pts), not this individual game.`;
+      }
+      function standingStat(r) {
+        return `<div class="stat"><span class="label">Leaderboard Standing</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div>`;
+      }
+      function difficultyAdjustments(r) {
+        const events = Array.isArray(r.difficulty_events) ? r.difficulty_events : [];
+        if (!events.length) return "";
+        return events.map((e) => `<div class="adjust-note" role="note">${esc(e.message)}</div>`).join("");
+      }
+      function uuid4() {
+        const b = crypto.getRandomValues(new Uint8Array(16));  // also works on plain-http LAN addresses
+        b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+        const h = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+        return `${h.slice(0,8)}-${h.slice(8,12)}-${h.slice(12,16)}-${h.slice(16,20)}-${h.slice(20)}`;
+      }
       function showFinal(s) {
         const r = s.result;
         lastCompleted = s;
@@ -438,7 +465,7 @@
         $("status").textContent = "Game complete! Your results have been saved.";
         $("viewResultsButton").classList.remove("hidden");
         $("resultsContent").innerHTML =
-          `<div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div><div class="stat"><span class="label">Player Rank</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div><div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><button class="secondary full" id="resultAnalysis" type="button">View Performance Analysis</button>`;
+          `<div class="grid"><div class="stat"><span class="label">Session ID</span><strong>${esc(s.display_id)}</strong></div>${standingStat(r)}<div class="stat"><span class="label">Codename</span><strong>${esc(s.codename)}</strong></div><div class="stat"><span class="label">Total Points</span><strong>${Number(r.score).toLocaleString()}</strong></div></div><p class="small muted standing-note">${esc(standingNote(r))}</p>${difficultyAdjustments(r)}<button class="secondary full" id="resultAnalysis" type="button">View Performance Analysis</button>`;
         $("resultAnalysis").onclick = () => showPerformance(s);
         // Pop the results up once per finished game; afterwards the player reopens them with the button.
         if (resultsShownFor !== s.session_id) {
@@ -522,6 +549,38 @@
         if (!$("analysisModal").classList.contains("hidden")) closeAnalysisModal();
         else if (!$("resultsModal").classList.contains("hidden")) closeResultsModal();
       });
+      function provisionalPill(conf) { return conf === "low" ? ' <span class="pill provisional">Provisional</span>' : ""; }
+      function intelligentSystemHtml(a, flatRecs, reasonText, classifications) {
+        const oa = a.overall_assessment;
+        if (!oa) {  // results saved before the structured analysis existed
+          return `${sectionHead("Intelligent System Analysis", reasonText)}
+            <p>Latest level classification: <strong>${esc(a.classification || "Not available")}</strong></p>
+            <p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p>
+            ${classifications ? `<p class="small">${classifications}</p>` : ""}
+            <h2 class="section-heading">Recommendations</h2>
+            ${flatRecs.length ? flatRecs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}`;
+        }
+        const notes = [reasonText, ...(a.data_notes || [])].filter(Boolean).join(" ");
+        const hist = a.history_comparison || {};
+        const strengths = a.strengths || [], weaknesses = a.weaknesses || [], recs = a.personalized_recommendations || [];
+        const weakIds = new Set(weaknesses.map((w) => w.id));
+        const sd = a.suggested_difficulty || {};
+        const card = (cls, title, text, conf) => `<div class="insight ${cls}"><strong>${esc(title)}${provisionalPill(conf)}</strong><div class="small">${esc(text)}</div></div>`;
+        const adj = Number(sd.adjustment || 0);
+        return `${sectionHead("Overall Assessment", notes)}
+          <p>${esc(oa.summary)}</p>
+          ${classifications ? `<p class="small">${classifications}</p>` : ""}
+          ${hist.available ? `<p class="small muted">${esc(hist.basis)}</p>` : ""}
+          <h2 class="section-heading">Detected Strengths</h2>
+          ${strengths.length ? strengths.map((x) => card("good", x.title, x.evidence, x.confidence)).join("") : "<p class='small muted'>No clear strengths detected yet.</p>"}
+          <h2 class="section-heading">Detected Weaknesses</h2>
+          ${weaknesses.length ? weaknesses.map((x) => card("warn", x.title, x.evidence, x.confidence)).join("") : "<p class='small muted'>No weaknesses detected.</p>"}
+          <h2 class="section-heading">Personalized Recommendations</h2>
+          ${recs.length ? recs.map((x) => `<div class="insight"><strong>${esc(x.action)}${provisionalPill(x.confidence)}</strong><div class="why">${esc(x.detected)}${weakIds.has(x.id) ? "" : " " + esc(x.evidence)}</div></div>`).join("") : "<p class='small muted'>No recommendations available.</p>"}
+          ${sectionHead("Suggested Difficulty", sd.scope || "")}
+          <p>${sd.recommended_level == null ? "No suggestion available." : `Level ${esc(sd.current_level)} → <strong>Level ${esc(sd.recommended_level)}</strong> (${adj > 0 ? "+" : ""}${adj})${provisionalPill(sd.provisional ? "low" : "")}`}</p>
+          <p class="small muted">${esc(sd.explanation || "")}</p>`;
+      }
       function showPerformance(s) {
         openAnalysisModal();
         const el = $("performanceView");
@@ -572,21 +631,18 @@
           <div class="sessionid">${esc(s.display_id)}</div>
           <p class="muted">Player: ${esc(s.codename)}</p>
           <div class="grid">
-            <div class="stat"><span class="label">Player Rank</span><strong>${r.ranking ? "#" + r.ranking : "—"}</strong></div>
+            ${standingStat(r)}
             <div class="stat"><span class="label">Points</span><strong>${Number(r.score).toLocaleString()}</strong></div>
             <div class="stat"><span class="label">Highest Level</span><strong>${r.highest_level}</strong></div>
             <div class="stat"><span class="label">Overall Accuracy</span><strong>${Number(r.accuracy).toFixed(1)}%</strong></div>
             <div class="stat"><span class="label">Failed Sequences</span><strong>${r.mistakes}</strong></div>
             <div class="stat"><span class="label">Avg. Button Response</span><strong>${r.avg_response_time_ms == null ? "—" : Number(r.avg_response_time_ms).toFixed(0) + " ms"}</strong></div>
           </div>
-          ${sectionHead("Intelligent System Analysis", reasonText)}
-          <p>Latest level classification: <strong>${esc(a.classification || "Not available")}</strong></p>
-          <p>Proposed level adjustment: <strong>${a.proposed_level_adjustment ?? "—"}</strong></p>
-          ${classifications ? `<p class="small">${classifications}</p>` : ""}
+          <p class="small muted standing-note">${esc(standingNote(r))}</p>
+          ${difficultyAdjustments(r) ? `${sectionHead("Difficulty adjustments during this game", "The game itself lowered the difficulty in real time. This is separate from the Suggested Difficulty below, which is a post-game suggestion for your next game.")}${difficultyAdjustments(r)}` : ""}
+          ${intelligentSystemHtml(a, recs, reasonText, classifications)}
           ${sectionHead("Per-Level Performance", "Tap a level to see its cumulative sequence attempts, failed sequences, individual incorrect presses, accuracy, response-time summaries, and the exact position of each incorrect press.")}
           ${levels.length ? `<div class="level-chart">${levelCards}</div>` : `<p>Per-level summaries were not included in this result.</p>`}
-          <h2 class="section-heading">Recommendations</h2>
-          ${recs.length ? recs.map((x) => `<div class="recommendation">${esc(x)}</div>`).join("") : "<p>No recommendations available.</p>"}
           <p class="small muted">IS confidence: ${esc(a.confidence || "not available")}${infoTip(confidenceText.trim())}</p>
         </div>`;
         el.querySelectorAll(".level-toggle").forEach((btn) => {
@@ -650,7 +706,20 @@
       const headerDate = $("headerDate");
       if (headerDate) headerDate.textContent = new Intl.DateTimeFormat(undefined, {weekday:"short", month:"short", day:"numeric"}).format(new Date());
       async function checkApiStatus() {
-        try { const h = await api('/api/health'); $("deviceStatus").textContent = 'Backend reachable'; $("apiStatus").textContent = h.supabase_configured ? 'Database configured' : 'Database not configured'; $("deviceDot").className = 'dot good'; $("deviceStatusNote").textContent = 'The API is responding. Physical ESP32 connectivity cannot currently be confirmed because this firmware/backend version does not expose a device heartbeat.'; }
+        try {
+          const h = await api('/api/health');
+          const db = h.database || {};
+          const labels = {ok: 'Database connected', unreachable: 'Database unreachable', not_configured: 'Database not configured',
+            schema_mismatch: 'Database schema mismatch', auth_error: 'Database credentials rejected', error: 'Database error'};
+          $("deviceStatus").textContent = 'Backend reachable';
+          $("apiStatus").textContent = labels[db.status] || (h.supabase_configured ? 'Database configured' : 'Database not configured');
+          $("deviceDot").className = db.status === 'ok' ? 'dot good' : 'dot bad';
+          const dev = h.device || {};
+          const board = dev.status === 'recently_seen'
+            ? `The board contacted the server ${dev.last_seen_seconds_ago}s ago.`
+            : 'Board connection unknown: no recent contact from the board (it does not report during a game or while offline).';
+          $("deviceStatusNote").textContent = (db.status === 'ok' ? '' : (db.detail || '') + ' ') + board;
+        }
         catch (e) { $("deviceStatus").textContent = 'Backend unavailable'; $("apiStatus").textContent = 'Connection error'; $("deviceDot").className = 'dot bad'; $("deviceStatusNote").textContent = e.message; }
       }
       checkApiStatus();

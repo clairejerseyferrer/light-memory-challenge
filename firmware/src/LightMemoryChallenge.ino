@@ -65,7 +65,7 @@
 // =================================================================
 const char* WIFI_SSID     = SECRET_SSID;
 const char* WIFI_PASSWORD = SECRET_OPTIONAL_PASS;
-// Address of the computer running:  uvicorn main:app --host 0.0.0.0 --port 8000
+// Address of the computer running:  python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000
 // (no slash at the end; use https://... if the backend is hosted online)
 const char* SERVER_BASE   = SECRET_API_BASE_URL;
 // Must match DEFAULT_DEVICE_ID and DEVICE_API_TOKEN in the backend .env file.
@@ -162,6 +162,13 @@ struct LevelStats {
   uint32_t fastestResponseMs, slowestResponseMs;
   uint8_t sequenceLength;
 };
+// In-game adaptive-difficulty adjustments (two failed sequences on one level ->
+// one level lower). Uploaded with the result so the website can explain them.
+// With 3 lives at most one drop can happen per game; 4 is a safe ceiling.
+const int MAX_DIFFICULTY_EVENTS = 4;
+struct DifficultyEvent { uint8_t round, fromLevel, toLevel, mistakesAtLevel; };
+DifficultyEvent difficultyEvents[MAX_DIFFICULTY_EVENTS];
+int difficultyEventCount = 0;
 RoundLog roundLog[MAX_LOGGED_ROUNDS];
 int roundLogCount = 0;
 LevelStats levelStats[MAX_LEVEL + 1];
@@ -217,7 +224,7 @@ int updateOnCorrect();
 void updateOnMistake(bool wasTimeout);
 void drawCenteredText(const String &text, int y, uint8_t size, uint16_t color);
 void showScoreboard(const char* headline, int roundPoints);
-void showLevelRevertedAnimation(int newLevel);
+void showLevelRevertedAnimation(int fromLevel, int newLevel);
 void endGame();
 void showFinalScreen();
 void showCountdown(long n);
@@ -406,6 +413,7 @@ void resetGame() {
   pressMinMs = 0;
   pressMaxMs = 0;
   roundLogCount = 0;
+  difficultyEventCount = 0;
   memset(levelStats, 0, sizeof(levelStats));
   allLevelsCleared = false;
   mistakesAtCurrentLevel = 0;
@@ -674,7 +682,7 @@ void checkInput() {
   showScoreboard(headline, pointsEarned);
   if (levelWasReverted) {
     delay(650); // let the player read the updated score first
-    showLevelRevertedAnimation(level);
+    showLevelRevertedAnimation(levelBeforeAttempt, level);
     showScoreboard(headline, pointsEarned); // leave the score screen as the final view
     delay(600);
   } else {
@@ -748,7 +756,12 @@ void updateOnMistake(bool wasTimeout) {
   // Level 1 is the floor; a successful sequence resets this counter too.
   if (mistakesAtCurrentLevel >= 2) {
     if (level > 1) {
+      const int fromLevel = level;
       level--;
+      if (difficultyEventCount < MAX_DIFFICULTY_EVENTS) {
+        difficultyEvents[difficultyEventCount++] = {
+          (uint8_t)totalRounds, (uint8_t)fromLevel, (uint8_t)level, (uint8_t)mistakesAtCurrentLevel};
+      }
       if (sequenceLength > 3) sequenceLength--;
       Serial.printf("Adaptive difficulty: two mistakes on level; dropping to level %d\n", level);
     }
@@ -793,10 +806,11 @@ void showFinalScreen() {
   drawCenteredText("FINAL SCORE", 44, 1, ST77XX_CYAN);
   drawCenteredText(String(score), 57, 4, ST77XX_YELLOW);
 
-  String rankLine = "RANK ";
+  // The server's "ranking" is the codename's LEADERBOARD position, not a rank for this one game.
+  String rankLine = "LEADERBOARD ";
   if (delivered && lastRank > 0) rankLine += "#" + String(lastRank);
   else rankLine += "--";
-  rankLine += "   LEVEL " + String(highestLevel);
+  rankLine += "  LVL " + String(highestLevel);
   drawCenteredText(rankLine, 99, 1, ST77XX_WHITE);
 
   if (delivered) drawCenteredText("SAVED ONLINE", 114, 1, ST77XX_GREEN);
@@ -838,6 +852,15 @@ void buildPayload(char* buf, size_t n) {
     appendf(buf, n, len,
       "\"avg_response_time_ms\":null,\"fastest_response_time_ms\":null,\"slowest_response_time_ms\":null,");
   }
+
+  // Adaptive-difficulty adjustments made during this game (usually none).
+  appendf(buf, n, len, "\"difficulty_events\":[");
+  for (int i = 0; i < difficultyEventCount; i++) {
+    const DifficultyEvent &e = difficultyEvents[i];
+    appendf(buf, n, len, "%s{\"r\":%u,\"f\":%u,\"t\":%u,\"m\":%u}",
+            i ? "," : "", e.round, e.fromLevel, e.toLevel, e.mistakesAtLevel);
+  }
+  appendf(buf, n, len, "],");
 
   // Per-level summaries are cumulative across every attempt, not a rolling
   // sample. Each level row also contains every incorrect press position.
@@ -1261,7 +1284,7 @@ void showScoreboard(const char* headline, int roundPoints) {
 
 // A short, playful clown-style warning makes an adaptive level drop obvious.
 // The display returns to the normal score screen immediately afterward.
-void showLevelRevertedAnimation(int newLevel) {
+void showLevelRevertedAnimation(int fromLevel, int newLevel) {
   display.fillScreen(ST77XX_BLACK);
   drawCenteredText("OOPS...!", 3, 2, ST77XX_RED);
 
@@ -1278,8 +1301,9 @@ void showLevelRevertedAnimation(int newLevel) {
   display.fillCircle(53, 57, 5, ST77XX_MAGENTA);
   display.fillCircle(107, 57, 5, ST77XX_MAGENTA);
 
-  drawCenteredText("LEVEL REVERTED!", 87, 1, ST77XX_YELLOW);
-  drawCenteredText("BACK TO LEVEL " + String(newLevel), 103, 1, ST77XX_CYAN);
+  // Same facts the website shows: which level caused it and where the game is now.
+  drawCenteredText("2 MISTAKES ON LEVEL " + String(fromLevel), 87, 1, ST77XX_YELLOW);
+  drawCenteredText("DIFFICULTY NOW LEVEL " + String(newLevel), 103, 1, ST77XX_CYAN);
   playTone(420, 120);
   delay(120);
   playTone(320, 180);
