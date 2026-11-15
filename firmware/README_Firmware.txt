@@ -36,6 +36,13 @@ The firmware records cumulative per-level telemetry:
 
 FastAPI expands the firmware's compact JSON keys into descriptive names before analysis and database storage. The existing game_results.round_data JSONB column is sufficient; no database migration is needed for this telemetry.
 
+Adaptive difficulty events (in-game rule)
+- Two failed sequences on the same level lower the level (and sequence length) by one. Level 1 is the floor and produces no event.
+- Each real drop is recorded and uploaded as "difficulty_events": [{"r":round,"f":from_level,"t":to_level,"m":mistakes_at_level}] in the result JSON. The backend validates it against the rule and the per-level telemetry and the website shows: "Difficulty adjusted: You made two mistakes at Level N. The game has reduced the difficulty to Level N-1 ...".
+- During play the TFT shows the same facts between rounds (never while buttons are being read). The website shows them after the result is uploaded, not live: posting to the server mid-game would block button input for up to the HTTP timeout.
+- This is different from the Intelligent System's post-game "Suggested Difficulty", which only advises the next game.
+- The final TFT screen's number is the codename's LEADERBOARD position (labelled "LEADERBOARD #n"), not a rank for that one game.
+
 Setup
 1. Open src/LightMemoryChallenge.ino in Arduino IDE.
 2. Install Adafruit GFX and Adafruit ST7735 and ST7789. WiFi, SPI, HTTPClient, Preferences, and time are supplied by the ESP32 board package.

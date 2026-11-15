@@ -65,12 +65,30 @@ Do not append a backslash to `8000`. In PowerShell, a backslash is not the line-
 - `ModuleNotFoundError: No module named 'intelligent_system'`: ensure you are in the repository root and use `python -m uvicorn backend.main:app ...`.
 - `Supabase is not configured`: check that `.env` is in the repository root and that both Supabase values are set.
 - `No session_number returned` or session creation fails: confirm the readable-session migration has been applied.
-- `Could not save results` / missing columns: compare the actual Supabase table columns against `database/schema.sql`; do not assume the live database matches the local schema.
+- Errors now say what kind of failure it was. Check the server log (each 5xx has a `ref` code and a full traceback):
+  - "The database could not be reached" / "took too long": connectivity, a sleeping or cold-starting host, or a Supabase pause. Not a migration problem.
+  - "The server could not authenticate with the database": check `SUPABASE_SERVICE_ROLE_KEY`.
+  - "The database structure does not match ... migration": only this message means a table/column is missing; compare the live tables against `database/schema.sql`.
+
+## 6. Health check and optional settings
+
+`GET /api/health` returns `status: "ok"` only when the database really answered (`"degraded"` otherwise), plus `database.status` (`ok`, `unreachable`, `schema_mismatch`, `auth_error`, `not_configured`) and `device.status`. The board is shown as `recently_seen` only if it contacted the server in the last 15 seconds (it polls once a second while idle, but not during a game or when offline); otherwise `unknown`. The health check does not retry, so it shows real connectivity.
+
+Optional environment variables (defaults in brackets): `DB_TIMEOUT_SECONDS` [10], `DB_RETRY_ATTEMPTS` [3], `DB_RETRY_BASE_DELAY` [0.25], `DB_RETRY_BUDGET_SECONDS` [12], `DB_PAGE_SIZE` [1000; keep at or below the Supabase "Max rows" setting], `LOG_LEVEL` [INFO].
+
+## 7. Run the tests
+
+From the repository root (no extra packages needed; a C++ compiler and Node are optional and enable extra integration checks):
+
+```powershell
+python -m unittest discover -s tests -t . -v
+```
 
 ## Notes on this update
 
 - Session ID is stored in browser `localStorage`, then fetched from the backend after reload so the backend remains the source of truth.
 - The queue allows at most three sessions in `waiting` status per device, and only the first waiting player can start when no game is active.
+- The in-game adaptive rule (two failed sequences on one level lower the level by one) runs on the ESP32. The post-game Intelligent System only *suggests* a level for the next game. See UPDATE_NOTES.md.
 - GPIO15 is now the physical abandon/reset button only. Hold it for 2 seconds during countdown or gameplay; it never starts a game. The website remains responsible for starting a queued session.
 - The ESP32 calls authenticated `POST /api/device/abandon` with the exact `device_id` and `session_id`. If Wi-Fi is unavailable, that exact session ID is persisted and retried before the board accepts another start command.
 - The website countdown uses a monotonic browser timer and server-provided remaining milliseconds rather than comparing the phone's wall clock directly to a UTC timestamp. Network delay or a backgrounded mobile tab can still affect what the player sees, while the backend's scheduled start remains authoritative.

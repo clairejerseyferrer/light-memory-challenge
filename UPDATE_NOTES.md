@@ -1,3 +1,40 @@
+# Update 2026-11-14 — Intelligent System recommendations, ranking clarity, backend reliability, difficulty explanations
+
+## Two different "difficulty" features (do not confuse them)
+
+| | Gameplay adaptive difficulty | Post-game Intelligent System suggestion |
+|---|---|---|
+| Where | ESP32 firmware, during the game | Backend `intelligent_system.py`, after the game |
+| Rule | Two failed sequences on the same level lower the level by exactly one (Level 1 is the floor) | PDF rules: classify the latest level from accuracy, input pace and failed-sequence rate, then suggest a level for the NEXT game |
+| Effect | Changes the game in progress | Advice only; the game always starts at Level 1 |
+| Shown to the player | TFT notice at the moment it happens, and the website results afterwards ("Difficulty adjusted: ...") | "Suggested Difficulty" section of the Performance Analysis |
+
+## What changed
+
+- **Recommendations** (`backend/intelligent_system.py`): evidence-backed insights for problem buttons (count, share, levels), mistake position (first/middle/last third, compared with what even spread would give), deterioration at higher levels, input pace and closeness to the level time limit, and comparison with the previous completed session of the same codename. Output is organised into Overall Assessment, Strengths, Weaknesses, Personalized Recommendations and Suggested Difficulty. Every insight carries a confidence; low-confidence ones are labelled provisional. The classification and difficulty rules themselves are unchanged. The old flat `recommendations` list is still returned.
+- **Timing wording**: per-level times are whole-sequence input times and the game-wide figure is the average time per button press. Neither is pure reaction speed, and the text says so. No firmware change was needed to collect timing.
+- **Ranking** (`backend/data_access.py`): the result's `ranking` is, and always was, the codename's leaderboard position. It is now also returned as `leaderboard` (rank, label, which session holds the entry, whether it is this session) and the dashboard/TFT label it "Leaderboard standing". Ranking order and one-entry-per-codename are unchanged. Tie-break timestamps are now compared as dates, not strings.
+- **Backend reliability**: real exceptions are logged with tracebacks and an error reference; users get specific, safe messages (503 for database connectivity, schema/migration wording only for genuine schema errors); `/api/health` now checks the database and reports the board as unknown unless it contacted the server recently; reads are retried with exponential backoff; writes are never blindly replayed; session creation is idempotent; leaderboard/history reads are paginated; player search no longer re-reads the leaderboard once per session.
+- **Difficulty explanations**: the firmware uploads each real adjustment; the backend re-validates it and the dashboard shows the message in the results pop-up and analysis.
+- **Tests**: `python -m unittest discover -s tests -t .` (see RUNNING.md).
+
+## Files changed / added
+
+Changed: `backend/main.py`, `backend/intelligent_system.py`, `firmware/src/LightMemoryChallenge.ino`, `web/index.html`, `tests/test_intelligent_system.py`, `RUNNING.md`, `UPDATE_NOTES.md`, `SCORING_CHANGELOG.txt`, `firmware/README_Firmware.txt`, `.env.example`.
+Added: `backend/reliability.py`, `backend/data_access.py`, `backend/telemetry.py`, `backend/difficulty_events.py`, `tests/fakes.py`, `tests/firmware_harness.py`, `tests/test_reliability.py`, `tests/test_ranking.py`, `tests/test_difficulty_events.py`, `tests/test_integration.py`, `tests/__init__.py`.
+
+## Database
+
+No migration is required. Difficulty events are stored inside the existing `game_results.analysis` JSONB (`gameplay_difficulty_events`).
+
+## Documentation corrections made in this update
+
+- The IS minimum is 1 sequence (provisional), not 3.
+- "The adaptive Intelligent System remains removed" (SCORING_CHANGELOG) referred to response-time-adaptive *scoring*; the two-mistake level reduction and the post-game IS both exist (table above).
+- Older sections below describe the website text about the physical abandon button; that text has since been removed from the player-facing pages.
+
+---
+
 # Firmware, Backend, IS, and Dashboard Update
 
 ## Main behavior changes

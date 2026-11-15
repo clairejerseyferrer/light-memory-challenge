@@ -14,7 +14,7 @@ The full-score window is 5 seconds at Level 1 and increases by 1 second per leve
 After that window, points decrease linearly to zero at the response deadline.
 A timeout earns zero points.
 
-The adaptive Intelligent System remains removed, as requested. The existing
+Response-time-adaptive SCORING remains removed, as requested. (This is not the same as the in-game two-mistake level reduction or the post-game Intelligent System suggestions, which both exist; see UPDATE_NOTES.md.) The existing
 non-adaptive level response deadline is retained: 15 seconds base at Level 1,
 +1 second per level up to 30 seconds, plus the existing 5-second grace period.
 
@@ -25,3 +25,5 @@ Preserved:
 
 Only the firmware scoring/deadline consistency and this changelog were changed.
 Hardware and live-backend tests are still required before deployment.
+
+Note 2026-11-14: scoring formulas and leaderboard ranking criteria were NOT changed by the later recommendation/ranking/reliability update.
