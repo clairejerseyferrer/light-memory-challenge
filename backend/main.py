@@ -1,74 +1,161 @@
-import logging
 import os
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from supabase import Client, create_client
-from .data_access import (  # noqa: F401 - build_leaderboard_entries/get_result stay importable from main
-    build_leaderboard_entries, create_waiting_session, dt_utc, fetch_previous_results,
-    get_result, queue_state, readable_id, search_sessions,
-)
-from .difficulty_events import validate_events
 from .intelligent_system import analyze_performance
-from .reliability import (
-    ApiError, ResilientClient, check_database, classify_db_error, new_error_id,
-)
-from .telemetry import normalize_difficulty_events_input, normalize_round_data
 
 load_dotenv()
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(),
-                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-logger = logging.getLogger("lmc")
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT.parent / "web"
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 DEVICE_API_TOKEN = os.getenv("DEVICE_API_TOKEN", "").strip()
 DEFAULT_DEVICE_ID = os.getenv("DEFAULT_DEVICE_ID", "ESP32-001").strip()
-DB_TIMEOUT_SECONDS = float(os.getenv("DB_TIMEOUT_SECONDS", "10") or 10)
-DEVICE_SEEN_WINDOW_SECONDS = 15
+supabase: Client | None = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY else None
+app = FastAPI(title="Light Memory Challenge API", version="0.4.0")
 
 
-def _make_supabase() -> Client | None:
-    if not (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY):
-        logger.warning("Supabase is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY missing).")
-        return None
-    try:  # bound every database call; the library default is far longer than a player will wait
-        from supabase.lib.client_options import ClientOptions
-        return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-                             options=ClientOptions(postgrest_client_timeout=DB_TIMEOUT_SECONDS))
-    except Exception as exc:  # noqa: BLE001 - option names differ between supabase-py versions
-        logger.warning("Could not apply the database timeout option (%s); using library defaults.", type(exc).__name__)
-        return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-
-
-supabase: Client | None = _make_supabase()
-app = FastAPI(title="Light Memory Challenge API", version="0.5.0")
-_device_last_seen: dict[str, float] = {}  # in-memory, per process; see /api/health
-
-
-def db() -> ResilientClient:
+def db() -> Client:
     if supabase is None:
         raise HTTPException(503, "Supabase is not configured. Check your .env file.")
-    return ResilientClient(supabase)
-
-
-def touch_device(device_id: str | None):
-    _device_last_seen[device_id or DEFAULT_DEVICE_ID] = time.monotonic()
-
+    return supabase
 
 def require_device_token(token: str | None):
     if not DEVICE_API_TOKEN:
         raise HTTPException(503, "DEVICE_API_TOKEN is not configured on the server.")
     if token != DEVICE_API_TOKEN:
         raise HTTPException(401, "Invalid or missing device token.")
+
+def dt_utc(value):
+    if not value: return None
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+def readable_id(number: int) -> str:
+    return f"Session #{int(number):03d}"
+
+def build_leaderboard_entries(client: Client):
+    """Build the canonical leaderboard: one personal-best result per codename."""
+    sessions_q = (client.table("game_sessions")
+        .select("id,codename,completed_at")
+        .eq("status", "completed")
+        .execute())
+    results_q = (client.table("game_results")
+        .select("session_id,score,highest_level,accuracy,saved_at")
+        .execute())
+
+    sessions_by_id = {row["id"]: row for row in (sessions_q.data or [])}
+    best_by_codename: dict[str, dict[str, Any]] = {}
+
+    def rank_key(row):
+        # This is the same order used for every displayed rank.
+        return (
+            -row["highest_level"],
+            -row["score"],
+            row["saved_at"] or "9999",
+            row["session_id"] or "",
+        )
+
+    for result in results_q.data or []:
+        session = sessions_by_id.get(result.get("session_id"))
+        if not session:
+            continue
+        codename = session.get("codename") or "Unknown"
+        key = codename.strip().casefold()
+        candidate = {
+            "codename": codename,
+            "session_id": result.get("session_id"),
+            "score": int(result.get("score") or 0),
+            "highest_level": int(result.get("highest_level") or 0),
+            "accuracy": float(result.get("accuracy") or 0),
+            "saved_at": result.get("saved_at"),
+        }
+        current = best_by_codename.get(key)
+        if current is None or rank_key(candidate) < rank_key(current):
+            best_by_codename[key] = candidate
+
+    entries = sorted(best_by_codename.values(), key=rank_key)
+    for index, entry in enumerate(entries, start=1):
+        entry["rank"] = index
+    return entries
+
+
+def get_result(client: Client, sid: str):
+    q = client.table("game_results").select("*").eq("session_id", sid).limit(1).execute()
+    if not q.data:
+        return None
+
+    result = q.data[0]
+    session_q = (client.table("game_sessions")
+        .select("codename")
+        .eq("id", sid)
+        .limit(1)
+        .execute())
+    codename = (
+        (session_q.data[0].get("codename") or "Unknown").strip().casefold()
+        if session_q.data else None
+    )
+
+    # Match the leaderboard's one-personal-best-per-codename ranking rather
+    # than ranking every raw game_results row independently.
+    entries = build_leaderboard_entries(client)
+    player_entry = next(
+        (entry for entry in entries
+         if entry["codename"].strip().casefold() == codename),
+        None,
+    )
+    result["ranking"] = player_entry["rank"] if player_entry else None
+    result["ranking_basis"] = (
+        "Highest level descending, score descending, then earliest saved result; "
+        "one personal-best entry per codename."
+    )
+    return result
+
+def queue_state(client: Client, device_id: str, session_id: str | None = None):
+    """Return the active game and FIFO waiting queue for one physical device."""
+    q = (
+        client.table("game_sessions")
+        .select("id,session_number,codename,device_id,status,created_at,start_at")
+        .eq("device_id", device_id)
+        .in_("status", ["waiting", "countdown", "playing"])
+        .order("created_at")
+        .order("session_number")
+        .execute()
+    )
+    rows = q.data or []
+    active = next((row for row in rows if row["status"] in ("countdown", "playing")), None)
+    waiting = [row for row in rows if row["status"] == "waiting"]
+    current = next((row for row in rows if row["id"] == session_id), None)
+    queue_position = next((i + 1 for i, row in enumerate(waiting) if row["id"] == session_id), None)
+    return {
+        "active_session": ({
+            "session_id": active["id"],
+            "display_id": readable_id(active["session_number"]),
+            "codename": active["codename"],
+            "status": active["status"],
+        } if active else None),
+        "waiting_count": len(waiting),
+        "max_waiting": 3,
+        "queue_position": queue_position,
+        "is_next": bool(current and current["status"] == "waiting" and not active and waiting and waiting[0]["id"] == session_id),
+        "waiting_sessions": [
+            {
+                "session_id": row["id"],
+                "display_id": readable_id(row["session_number"]),
+                "codename": row["codename"],
+                "created_at": row["created_at"],
+            }
+            for row in waiting
+        ],
+    }
 
 class CreateSession(BaseModel):
     codename: str = Field(min_length=2, max_length=24)
@@ -100,16 +187,39 @@ class GameResult(BaseModel):
     fastest_response_time_ms: float | None = Field(default=None, ge=0)
     slowest_response_time_ms: float | None = Field(default=None, ge=0)
     round_data: list[dict[str, Any]] = Field(default_factory=list)
-    difficulty_events: list[dict[str, Any]] = Field(default_factory=list)
     @field_validator("round_data", mode="before")
     @classmethod
-    def normalize_round_data_field(cls, value):
-        return normalize_round_data(value)
-
-    @field_validator("difficulty_events", mode="before")
-    @classmethod
-    def normalize_difficulty_events_field(cls, value):
-        return normalize_difficulty_events_input(value)
+    def normalize_round_data(cls, value):
+        if not isinstance(value, list):
+            raise ValueError("round_data must be a list.")
+        aliases = {
+            "l": "level",
+            "a": "sequences_attempted",
+            "c": "correct_sequences",
+            "m": "mistakes",
+            "ip": "incorrect_press_count",
+            "acc": "accuracy",
+            "avg": "avg_response_time_ms",
+            "fast": "fastest_response_time_ms",
+            "slow": "slowest_response_time_ms",
+            "n": "sequence_length",
+            "d": "incorrect_press_details",
+        }
+        normalized = []
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("Each round_data entry must be an object.")
+            row = dict(item)
+            for short, full in aliases.items():
+                if full not in row and short in row:
+                    row[full] = row.pop(short)
+            # Counts are the source of truth for per-level accuracy.
+            attempted = row.get("sequences_attempted")
+            correct = row.get("correct_sequences")
+            if isinstance(attempted, (int, float)) and attempted > 0 and isinstance(correct, (int, float)):
+                row["accuracy"] = round(100.0 * correct / attempted, 2)
+            normalized.append(row)
+        return normalized
 
     @field_validator("correct_rounds")
     @classmethod
@@ -118,68 +228,35 @@ class GameResult(BaseModel):
         if total is not None and value > total: raise ValueError("correct_rounds cannot exceed total_rounds.")
         return value
 
-@app.exception_handler(ApiError)
-async def api_error_handler(request: Request, exc: ApiError):
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
-
-
-@app.exception_handler(Exception)
-async def unhandled_error_handler(request: Request, exc: Exception):
-    """Log the real exception; return a safe, specific message (no stack trace, no secrets)."""
-    info = classify_db_error(exc)
-    error_id = new_error_id()
-    logger.error("Unhandled error [%s] %s %s kind=%s", error_id, request.method, request.url.path, info.kind,
-                 exc_info=(type(exc), exc, exc.__traceback__))
-    return JSONResponse({"detail": f"{info.message} (ref {error_id})", "error_id": error_id},
-                        status_code=info.status)
-
-
 @app.get("/", include_in_schema=False)
 def home(): return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-store"})
 
 @app.get("/api/health")
 def health():
-    """Backend, configuration, real database reachability, and device last-seen.
-
-    ``status`` is "ok" only when the database answered. The ESP32 is never
-    reported as connected: the board has no heartbeat, so the best available
-    evidence is "an authenticated request arrived recently" (it polls once a
-    second while idle, but not during a game or while offline).
-    """
-    database = ({"status": "not_configured", "detail": "Supabase is not configured.", "latency_ms": None}
-                if supabase is None else check_database(supabase))
-    seen = _device_last_seen.get(DEFAULT_DEVICE_ID)
-    age = None if seen is None else max(0, int(time.monotonic() - seen))
-    recent = age is not None and age <= DEVICE_SEEN_WINDOW_SECONDS
-    return {
-        "status": "ok" if database["status"] == "ok" else "degraded",
-        "backend": "ok",
-        "supabase_configured": supabase is not None,
-        "database": database,
-        "device": {
-            "status": "recently_seen" if recent else "unknown",
-            "last_seen_seconds_ago": age,
-            "note": "Connection to the ESP32 cannot be confirmed: the board sends no heartbeat while a game "
-                    "is running or when it is offline.",
-        },
-        "device_id": DEFAULT_DEVICE_ID, "api_version": "0.5.0",
-    }
+    return {"status": "ok", "supabase_configured": supabase is not None, "device_id": DEFAULT_DEVICE_ID, "api_version": "0.4.0"}
 
 @app.post("/api/sessions", status_code=201)
-def create_session(payload: CreateSession, idempotency_key: str | None = Header(default=None)):
+def create_session(payload: CreateSession):
     client = db()
-    session_id = None
-    if idempotency_key:
-        try:
-            session_id = str(UUID(idempotency_key))
-        except ValueError:
-            raise HTTPException(422, "Idempotency-Key must be a valid UUID.")
-    row, replayed = create_waiting_session(client, payload.codename, payload.device_id, session_id)
+    # Waiting sessions are capped at three; countdown/playing is the one active game.
+    current_queue = queue_state(client, payload.device_id)
+    if current_queue["waiting_count"] >= 3:
+        raise HTTPException(409, "The queue is full (maximum 3 waiting players). Please try again when a player starts or leaves.")
+    try:
+        response = client.table("game_sessions").insert({
+            "id": str(uuid4()), "codename": payload.codename,
+            "device_id": payload.device_id, "status": "waiting"
+        }).execute()
+    except Exception:
+        raise HTTPException(500, "Could not create session. Did you run migration_readable_session_ids.sql in Supabase?")
+    if not response.data: raise HTTPException(500, "Session was not created.")
+    row = response.data[0]
+    if row.get("session_number") is None:
+        raise HTTPException(500, "No session_number returned. Run the database migration.")
     return {
         "session_id": row["id"], "display_id": readable_id(row["session_number"]),
         "session_number": row["session_number"], "codename": row["codename"],
         "device_id": row["device_id"], "status": row["status"], "created_at": row["created_at"],
-        "idempotent_replay": replayed,
         **queue_state(client, row["device_id"], row["id"])
     }
 
@@ -238,7 +315,6 @@ def abandon_session(session_id: UUID):
 def device_abandon(payload: DeviceAbandon, x_device_token: str | None = Header(default=None)):
     """Abandon only the exact active session requested by the authenticated ESP32."""
     require_device_token(x_device_token)
-    touch_device(payload.device_id)
     client = db()
     sid = str(payload.session_id)
     q = (
@@ -280,7 +356,6 @@ def device_abandon(payload: DeviceAbandon, x_device_token: str | None = Header(d
 @app.get("/api/device/command")
 def device_command(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_token: str | None = Header(default=None)):
     require_device_token(x_device_token)
-    touch_device(device_id)
     client = db()
     # The board's physical abandon button targets the active countdown/game,
     # or the oldest waiting session when nobody has started yet.
@@ -331,7 +406,6 @@ def device_command(device_id: str = Query(default=DEFAULT_DEVICE_ID), x_device_t
 @app.post("/api/device/started")
 def device_started(payload: dict[str, str], x_device_token: str | None = Header(default=None)):
     require_device_token(x_device_token)
-    touch_device(DEFAULT_DEVICE_ID)
     sid = payload.get("session_id")
     if not sid: raise HTTPException(422, "session_id is required.")
     try: UUID(sid)
@@ -351,7 +425,12 @@ def device_started(payload: dict[str, str], x_device_token: str | None = Header(
 def leaderboard(limit: int = Query(default=100, ge=1, le=500)):
     """Return each codename's personal best; codenames are not authenticated identities."""
     client = db()
-    entries = build_leaderboard_entries(client)[:limit]
+    try:
+        entries = build_leaderboard_entries(client)
+    except Exception:
+        raise HTTPException(500, "Could not retrieve leaderboard data.")
+
+    entries = entries[:limit]
     return {
         "entries": entries,
         "count": len(entries),
@@ -363,9 +442,20 @@ def leaderboard(limit: int = Query(default=100, ge=1, le=500)):
 def search_player(codename: str = Query(min_length=2, max_length=24)):
     codename = codename.strip()
     if len(codename) < 2: raise HTTPException(422, "Enter at least two characters.")
-    if not all(ch.isalnum() or ch in " _-" for ch in codename):
-        raise HTTPException(422, "Use letters, numbers, spaces, hyphens, or underscores only.")
-    sessions = search_sessions(db(), codename)  # two queries total, however many sessions match
+    client = db()
+    try:
+        q = client.table("game_sessions").select("id,session_number,codename,status,created_at,completed_at").ilike("codename", codename).order("created_at", desc=True).limit(50).execute()
+    except Exception: raise HTTPException(500, "Could not search sessions.")
+    sessions = []
+    for row in q.data or []:
+        result = get_result(client, row["id"]) if row["status"] == "completed" else None
+        sessions.append({
+            "session_id": row["id"], "display_id": readable_id(row["session_number"]),
+            "codename": row["codename"], "status": row["status"], "created_at": row["created_at"],
+            "completed_at": row.get("completed_at"), "score": result.get("score") if result else None,
+            "highest_level": result.get("highest_level") if result else None,
+            "accuracy": result.get("accuracy") if result else None
+        })
     return {"codename": codename, "count": len(sessions), "sessions": sessions}
 
 @app.get("/api/sessions/{session_id}")
@@ -385,7 +475,7 @@ def get_session(session_id: UUID):
         ),
         "started_at": row.get("started_at"),
         "completed_at": row.get("completed_at"),
-        "result": get_result(client, sid, codename=row["codename"]) if row["status"] == "completed" else None,
+        "result": get_result(client, sid) if row["status"] == "completed" else None,
         **queue_state(client, row["device_id"], sid)
     }
 
@@ -482,16 +572,11 @@ def save_results(session_id: UUID, payload: GameResult):
         payload.avg_response_time_ms,
         payload.round_data,
         highest_level=payload.highest_level,
-        history=fetch_previous_results(client, session["codename"], sid),
     )
-    # In-game adaptive-difficulty adjustments reported by the ESP32, re-validated
-    # against the rule and the per-level telemetry. Stored inside the existing
-    # `analysis` JSONB, so no database migration is needed.
-    analysis["gameplay_difficulty_events"] = validate_events(payload.difficulty_events, payload.round_data)
 
     row = {
         "session_id": sid,
-        **payload.model_dump(exclude={"difficulty_events"}),
+        **payload.model_dump(),
         "analysis": analysis,
     }
 
@@ -517,8 +602,7 @@ def save_results(session_id: UUID, payload: GameResult):
             client.table("game_results").delete().eq("session_id", sid).execute()
             raise RuntimeError("Session changed before completion; inserted result was rolled back.")
 
-    except Exception as save_exc:
-        logger.exception("Saving results for session %s failed", sid)
+    except Exception:
         # Re-read the session after a failed insert/status update. If physical
         # abandonment won the race, remove any result row and never rank it.
         try:
@@ -584,12 +668,12 @@ def save_results(session_id: UUID, payload: GameResult):
         except HTTPException:
             raise
         except Exception:
-            logger.exception("Recovery after a failed result save also failed for session %s", sid)
+            pass
 
-        info = classify_db_error(save_exc)
-        if info.kind == "application":
-            raise ApiError(500, "Could not save the results. The board keeps unsent results and will retry.")
-        raise ApiError(info.status, info.message)
+        raise HTTPException(
+            500,
+            "Could not save results. Check Supabase columns and server logs."
+        )
 
     # 6. Return the newly saved result.
     result = get_result(client, sid)
@@ -601,7 +685,6 @@ def save_results(session_id: UUID, payload: GameResult):
         "codename": session["codename"],
         "score": payload.score,
         "ranking": result.get("ranking") if result else None,
-        "leaderboard": result.get("leaderboard") if result else None,
         "status": "completed",
         "analysis": analysis,
         "result": result,
