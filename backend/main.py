@@ -484,8 +484,9 @@ def save_results(session_id: UUID, payload: GameResult):
         highest_level=payload.highest_level,
         history=fetch_previous_results(client, session["codename"], sid),
     )
-    # In-game adaptive-difficulty adjustments reported by the ESP32, re-validated
-    # against the rule and the per-level telemetry. Stored inside the existing
+    # In-game adaptive-difficulty adjustments reported by the ESP32 (which alone
+    # detects the consecutive mistakes). The backend only checks them for
+    # plausibility against the per-level round data. Stored inside the existing
     # `analysis` JSONB, so no database migration is needed.
     analysis["gameplay_difficulty_events"] = validate_events(payload.difficulty_events, payload.round_data)
 

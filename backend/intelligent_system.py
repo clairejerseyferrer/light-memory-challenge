@@ -335,6 +335,49 @@ def _level_trend(valid: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
+BUTTON_SHARE_CHANGE = 0.10  # change in a button's share of incorrect presses worth reporting
+
+
+def _compare_button_share(prev_btn, cur_counts, improvements, regressions, notes) -> None:
+    """Compare a button's SHARE of incorrect presses, not raw counts.
+
+    Raw counts mislead when the number of incorrect presses differs between
+    games, so the share (button mistakes / all incorrect presses) decides;
+    the counts are kept in the wording. Zero totals never divide.
+    """
+    button, p_count, p_total = prev_btn["button"], prev_btn["count"], prev_btn["total"]
+    p_share = p_count / p_total
+    c_total = sum(cur_counts.values())
+    c_count = cur_counts.get(button, 0)
+    before = f"{p_share:.0%} ({p_count} of {p_total})"
+    if c_total == 0:  # share undefined: only the absolute change can be stated
+        improvements.append({"id": "improvement_button", "text":
+            f"No incorrect button presses were recorded this time, compared with {p_total} previously "
+            f"(Button {button} accounted for {before}). This is a drop in the number of mistakes; "
+            f"a share cannot be calculated."})
+        return
+    if c_total < MIN_BUTTON_MISTAKES:
+        notes.append(f"Only {c_total} incorrect button press(es) were recorded this time, which is too few to "
+                     f"compare Button {button}'s share of mistakes with the previous attempt.")
+        return
+    c_share = c_count / c_total
+    after = f"{c_share:.0%} ({c_count} of {c_total})"
+    delta = c_share - p_share
+    if delta <= -BUTTON_SHARE_CHANGE:
+        extra = (f" The raw count rose from {p_count} to {c_count} because more incorrect presses were "
+                 f"recorded overall." if c_count > p_count else "")
+        improvements.append({"id": "improvement_button", "text":
+            f"Button {button} made up a smaller share of your incorrect presses: {after} now versus "
+            f"{before} previously.{extra}"})
+    elif delta >= BUTTON_SHARE_CHANGE:
+        extra = (f" The raw count fell from {p_count} to {c_count} only because fewer incorrect presses were "
+                 f"recorded overall." if c_count < p_count else "")
+        regressions.append({"id": "regression_button", "text":
+            f"Button {button} made up a larger share of your incorrect presses: {after} now versus "
+            f"{before} previously.{extra}"})
+    # otherwise the shares are about equal: no trend is claimed, whatever the raw counts did
+
+
 def _history_comparison(cur: dict[str, Any], history: list[dict[str, Any]] | None) -> dict[str, Any]:
     basis = ("Compared with the previous completed session that used the same codename. "
              "Codenames are not verified identities, so this may be a different player.")
@@ -346,6 +389,7 @@ def _history_comparison(cur: dict[str, Any], history: list[dict[str, Any]] | Non
     prev_attempts = sum(m["sequences_attempted"] for m in prev_metrics) or int(_number(prev.get("total_rounds")))
     improvements: list[dict[str, str]] = []
     regressions: list[dict[str, str]] = []
+    notes: list[str] = []
 
     if cur["attempts"] >= MIN_HISTORY_ATTEMPTS and prev_attempts >= MIN_HISTORY_ATTEMPTS:
         prev_acc = _number(prev.get("accuracy"))
@@ -359,11 +403,7 @@ def _history_comparison(cur: dict[str, Any], history: list[dict[str, Any]] | Non
 
         prev_btn = _button_analysis(_incorrect_presses(prev.get("round_data") or []))
         if prev_btn["qualifies"]:
-            now = cur["button_counts"].get(prev_btn["button"], 0)
-            if now < prev_btn["count"]:
-                improvements.append({"id": "improvement_button", "text":
-                    f"Mistakes on Button {prev_btn['button']} fell from {prev_btn['count']} to {now} "
-                    f"compared with your previous attempt."})
+            _compare_button_share(prev_btn, cur["button_counts"], improvements, regressions, notes)
 
         prev_by_level = {m["level"]: m for m in prev_metrics if m["sequences_attempted"] >= MIN_GROUP_ATTEMPTS}
         common = sorted(l for l in cur["by_level"]
@@ -379,7 +419,7 @@ def _history_comparison(cur: dict[str, Any], history: list[dict[str, Any]] | Non
                     f"You were more consistent at {_range_text(top)}: failed sequences dropped from "
                     f"{prev_rate:.0%} to {cur_rate:.0%} compared with your previous attempt."})
     return {"available": True, "basis": basis, "previous_session_id": prev.get("session_id"),
-            "improvements": improvements, "regressions": regressions}
+            "improvements": improvements, "regressions": regressions, "notes": notes}
 
 
 def _build_insights(round_data, metrics, decision, target_level, history, game_accuracy,
@@ -527,6 +567,7 @@ def _build_insights(round_data, metrics, decision, target_level, history, game_a
            "button_counts": buttons.get("counts", {}), "by_level": by_level}
     history_result = _history_comparison(cur, history)
     if history_result["available"]:
+        notes.extend(history_result.get("notes", []))
         for item in history_result["improvements"]:
             strengths.append({"id": item["id"], "title": "Improvement since last attempt",
                               "evidence": item["text"], "confidence": "moderate"})

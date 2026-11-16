@@ -256,11 +256,12 @@ class HistoryTests(unittest.TestCase):
                 "round_data": [row(3, 6, 3, d)]}
 
     def test_improvements_are_reported_against_the_previous_attempt(self):
-        d = [detail(3, 5, 4, 2, 5)]
+        # Button 4 was 5 of 5 incorrect presses before; now it is 1 of 3 (a smaller share).
+        d = [detail(3, 5, 4, 2, 5), detail(3, 2, 2, 1, 5), detail(3, 3, 3, 1, 5)]
         result = analyze([row(3, 5, 4, d)], history=[self.previous()])
         text = " ".join(i["evidence"] for i in result["strengths"] if i["id"].startswith("improvement"))
         self.assertIn("Accuracy improved from 50% to 80%", text)
-        self.assertIn("Button 4 fell from 5 to 1", text)
+        self.assertIn("Button 4 made up a smaller share of your incorrect presses: 33% (1 of 3) now versus 100% (5 of 5)", text)
         self.assertTrue(result["history_comparison"]["available"])
 
     def test_no_history_means_no_comparison(self):
@@ -309,6 +310,102 @@ class PresentationTests(unittest.TestCase):
         self.assertEqual(result["suggested_difficulty"]["recommended_level"], result["recommended_level"])
         self.assertEqual(result["suggested_difficulty"]["adjustment"], result["proposed_level_adjustment"])
         self.assertIn("next game", result["suggested_difficulty"]["scope"])
+
+
+def presses(button_count, other_count, button=4):
+    """Incorrect-press details: ``button_count`` on ``button`` plus ``other_count`` on other buttons."""
+    others = [b for b in (1, 2, 3, 5, 6, 7) if b != button]
+    out = [detail(3, 5, button, 2, 5, r) for r in range(1, button_count + 1)]
+    out += [detail(3, 4, others[i % len(others)], 2, 5, 10 + i) for i in range(other_count)]
+    return out
+
+
+def game(button_count, other_count, attempts=6):
+    return [row(3, attempts, attempts // 2, presses(button_count, other_count))]
+
+
+def previous_game(button_count, other_count, attempts=6):
+    return {"session_id": "prev", "accuracy": 50.0, "mistakes": attempts - attempts // 2,
+            "highest_level": 3, "total_rounds": attempts, "round_data": game(button_count, other_count, attempts)}
+
+
+def button_items(result):
+    hc = result["history_comparison"]
+    return ([i for i in hc.get("improvements", []) if i["id"] == "improvement_button"],
+            [i for i in hc.get("regressions", []) if i["id"] == "regression_button"])
+
+
+class HistoryButtonProportionTests(unittest.TestCase):
+    """Button comparisons use the share of incorrect presses, not raw counts."""
+
+    def compare(self, prev, cur_rows):
+        return analyze(cur_rows, history=[prev], accuracy=50.0)
+
+    def test_lower_raw_count_but_higher_share_is_not_an_improvement(self):
+        # previous: 5 of 10 (50%); current: 3 of 4 (75%)
+        improved, worse = button_items(self.compare(previous_game(5, 5), game(3, 1)))
+        self.assertEqual(improved, [])
+        self.assertEqual(len(worse), 1)
+        text = worse[0]["text"]
+        self.assertIn("larger share", text)
+        self.assertIn("75% (3 of 4) now versus 50% (5 of 10)", text)
+        self.assertIn("raw count fell from 5 to 3 only because fewer incorrect presses", text)
+
+    def test_higher_raw_count_but_lower_share_is_a_share_improvement_not_fewer_mistakes(self):
+        # previous: 3 of 6 (50%); current: 4 of 12 (33%)
+        improved, worse = button_items(self.compare(previous_game(3, 3), game(4, 8)))
+        self.assertEqual(worse, [])
+        self.assertEqual(len(improved), 1)
+        text = improved[0]["text"]
+        self.assertIn("smaller share", text)
+        self.assertIn("33% (4 of 12) now versus 50% (3 of 6)", text)
+        self.assertIn("raw count rose from 3 to 4", text)
+        self.assertNotIn("fell from", text)
+
+    def test_equal_proportions_make_no_claim_despite_different_counts(self):
+        # previous 4 of 8 (50%); current 3 of 6 (50%)
+        improved, worse = button_items(self.compare(previous_game(4, 4), game(3, 3)))
+        self.assertEqual((improved, worse), ([], []))
+
+    def test_small_share_change_below_the_threshold_makes_no_claim(self):
+        # 50% -> 55% (5 of 9... use 5 of 9 = 56%)
+        improved, worse = button_items(self.compare(previous_game(5, 5), game(5, 4)))
+        self.assertEqual((improved, worse), ([], []))
+
+    def test_zero_total_mistakes_does_not_divide_by_zero_and_states_only_the_absolute_drop(self):
+        cur = [row(3, 5, 5)]  # no incorrect presses at all
+        improved, worse = button_items(self.compare(previous_game(5, 5), cur))
+        self.assertEqual(worse, [])
+        self.assertEqual(len(improved), 1)
+        self.assertIn("No incorrect button presses were recorded this time, compared with 10 previously", improved[0]["text"])
+        self.assertIn("a share cannot be calculated", improved[0]["text"])
+
+    def test_too_few_current_mistakes_is_noted_not_claimed(self):
+        result = self.compare(previous_game(5, 5), game(1, 1))  # only 2 incorrect presses
+        self.assertEqual(button_items(result), ([], []))
+        self.assertTrue(any("too few to compare" in n for n in result["data_notes"]))
+
+    def test_previous_button_without_enough_evidence_is_not_compared(self):
+        result = self.compare(previous_game(1, 1), game(3, 1))  # previous had 2 presses only
+        self.assertEqual(button_items(result), ([], []))
+
+    def test_missing_history_means_no_comparison(self):
+        for hist in (None, []):
+            result = analyze(game(3, 1), history=hist)
+            self.assertFalse(result["history_comparison"]["available"])
+            self.assertEqual(button_items(result), ([], []))
+
+    def test_thin_previous_attempt_means_no_comparison(self):
+        prev = previous_game(5, 5, attempts=2)  # fewer than the 3-sequence minimum
+        result = analyze(game(3, 1), history=[prev], accuracy=50.0)
+        self.assertTrue(result["history_comparison"]["available"])
+        self.assertEqual(result["history_comparison"]["improvements"], [])
+        self.assertEqual(result["history_comparison"]["regressions"], [])
+
+    def test_a_share_regression_is_reported_as_a_weakness_not_a_strength(self):
+        result = self.compare(previous_game(5, 5), game(3, 1))
+        self.assertIn("regression_button", [w["id"] for w in result["weaknesses"]])
+        self.assertNotIn("improvement_button", [x["id"] for x in result["strengths"]])
 
 
 if __name__ == "__main__":

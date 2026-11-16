@@ -6,14 +6,18 @@ Intelligent System suggestion in intelligent_system.py):
     Two failed sequences on the same level reduce the active difficulty by
     exactly one level. Level 1 is the floor (no change, so no event).
 
-The firmware records each real adjustment and uploads it with the result. The
-backend re-validates every event against that rule and against the per-level
-telemetry before showing it, so the website can never claim an adjustment the
-game did not make.
+The firmware records each real adjustment (it alone detects the consecutive
+mistakes) and uploads it with the result. The backend only runs a plausibility
+and consistency check of each event against the submitted per-level round data
+before showing it; it cannot independently verify that the mistakes were
+consecutive.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("lmc")
 
 TRIGGER = "two_mistakes_same_level"
 MISTAKES_REQUIRED = 2
@@ -21,11 +25,19 @@ MAX_LEVEL = 20  # matches MAX_LEVEL in the firmware
 
 
 def _int(value: Any) -> int | None:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
+    """Strict integer parsing: no bools, no truncated floats."""
+    if isinstance(value, bool):
         return None
-    return number
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
+    return None
 
 
 def explain_event(event: dict[str, Any]) -> str:
@@ -36,37 +48,72 @@ def explain_event(event: dict[str, Any]) -> str:
     )
 
 
+REQUIRED_FIELDS = ("round", "from_level", "to_level", "mistakes_at_level")
+
+
+def _level_mistakes(round_data: Any) -> dict[int, int]:
+    totals: dict[int, int] = {}
+    if isinstance(round_data, list):
+        for row in round_data:
+            level = _int(row.get("level")) if isinstance(row, dict) else None
+            if level is not None:
+                totals[level] = totals.get(level, 0) + (_int(row.get("mistakes")) or 0)
+    return totals
+
+
+def check_event(raw: Any, level_mistakes: dict[int, int]) -> tuple[dict[str, Any] | None, str | None]:
+    """Return ``(event, None)`` if plausible, else ``(None, reason)``."""
+    if not isinstance(raw, dict):
+        return None, "event is not an object"
+    missing = [k for k in REQUIRED_FIELDS if raw.get(k) is None]
+    if missing:
+        return None, "missing field(s): " + ", ".join(missing)  # nothing is defaulted
+    values = {k: _int(raw[k]) for k in REQUIRED_FIELDS}
+    bad = [k for k, v in values.items() if v is None]
+    if bad:
+        return None, "not a valid integer: " + ", ".join(bad)
+    round_no, from_level = values["round"], values["from_level"]
+    to_level, mistakes = values["to_level"], values["mistakes_at_level"]
+    if round_no < 1:
+        return None, "round must be a positive number"
+    if from_level <= to_level:
+        return None, "from_level must be greater than to_level"
+    if to_level != from_level - 1:
+        return None, "the drop must be exactly one level"
+    if not (2 <= from_level <= MAX_LEVEL):
+        return None, "from_level is outside 2..max level (Level 1 is the floor)"
+    if mistakes != MISTAKES_REQUIRED:
+        return None, f"mistakes_at_level must be {MISTAKES_REQUIRED}"
+    if not level_mistakes:
+        return None, "no supporting round data"
+    if from_level not in level_mistakes:
+        return None, f"no round data for Level {from_level}"
+    if level_mistakes[from_level] < MISTAKES_REQUIRED:
+        return None, f"round data shows fewer than {MISTAKES_REQUIRED} mistakes at Level {from_level}"
+    event = {"round": round_no, "from_level": from_level, "to_level": to_level,
+             "mistakes_at_level": mistakes, "trigger": TRIGGER}
+    event["message"] = explain_event(event)
+    return event, None
+
+
 def validate_events(events: Any, round_data: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
-    """Return explained, rule-consistent events; drop anything that breaks the rule."""
+    """Return explained events that pass a plausibility check; reject the rest.
+
+    This is a consistency check against the submitted per-level totals, not
+    independent proof. The aggregate data can show that at least two failed
+    sequences happened at ``from_level`` but NOT that they were consecutive:
+    the ESP32 detects that condition and remains responsible for it. An event
+    without supporting round data is rejected, and no field is ever defaulted.
+    Rejections are logged with the reason.
+    """
     if not isinstance(events, list):
         return []
-    level_mistakes: dict[int, int] = {}
-    for row in round_data or []:
-        if isinstance(row, dict) and _int(row.get("level")) is not None:
-            level_mistakes[_int(row["level"])] = int(row.get("mistakes") or 0)
-
+    level_mistakes = _level_mistakes(round_data)
     valid: list[dict[str, Any]] = []
     for raw in events:
-        if not isinstance(raw, dict):
-            continue
-        from_level, to_level = _int(raw.get("from_level")), _int(raw.get("to_level"))
-        round_no = _int(raw.get("round"))
-        mistakes = _int(raw.get("mistakes_at_level", MISTAKES_REQUIRED))
-        if from_level is None or to_level is None:
-            continue
-        if not (2 <= from_level <= MAX_LEVEL) or to_level != from_level - 1:
-            continue  # Level 1 is the floor and a drop is exactly one level.
-        if mistakes != MISTAKES_REQUIRED:
-            continue
-        if level_mistakes and level_mistakes.get(from_level, 0) < MISTAKES_REQUIRED:
-            continue  # telemetry shows fewer than two failed sequences on that level
-        event = {
-            "round": round_no,
-            "from_level": from_level,
-            "to_level": to_level,
-            "mistakes_at_level": MISTAKES_REQUIRED,
-            "trigger": TRIGGER,
-        }
-        event["message"] = explain_event(event)
-        valid.append(event)
+        event, reason = check_event(raw, level_mistakes)
+        if event is None:
+            logger.warning("Rejected difficulty event: %s", reason)
+        else:
+            valid.append(event)
     return valid
