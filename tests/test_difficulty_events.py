@@ -1,6 +1,18 @@
 import unittest
 
-from backend.difficulty_events import check_event, explain_event, validate_events
+from backend.difficulty_events import check_event as _check_event
+from backend.difficulty_events import explain_event
+from backend.difficulty_events import validate_events as _validate_events
+
+TOTAL = 20  # a game long enough to contain the sample events (round 7)
+
+
+def validate_events(events, round_data=None, total_rounds=TOTAL):
+    return _validate_events(events, round_data, total_rounds)
+
+
+def check_event(raw, level_mistakes, total_rounds=TOTAL):
+    return _check_event(raw, level_mistakes, total_rounds)
 from backend.telemetry import normalize_difficulty_events_input
 
 LEVEL5 = [{"level": 5, "mistakes": 2}]
@@ -122,6 +134,45 @@ class EventSupportingDataTests(unittest.TestCase):
         self.assertEqual(check_event(event(to_level=5), {5: 2})[1], "from_level must be greater than to_level")
         self.assertEqual(check_event(event(to_level=3), {5: 2})[1], "the drop must be exactly one level")
         self.assertIn("fewer than 2 mistakes", check_event(event(), {5: 1})[1])
+
+
+class EventRoundWithinGameTests(unittest.TestCase):
+    """The event's round must satisfy 1 <= round <= total_rounds (real functions, explicit totals)."""
+    ROWS = [{"level": 5, "mistakes": 2}]
+
+    def run_event(self, round_no, total):
+        return _validate_events([event(round=round_no)], self.ROWS, total)
+
+    def test_event_on_round_1_is_accepted(self):
+        (ev,) = self.run_event(1, 10)
+        self.assertEqual(ev["round"], 1)
+
+    def test_event_on_the_final_valid_round_is_accepted(self):
+        (ev,) = self.run_event(10, 10)
+        self.assertEqual(ev["round"], 10)
+
+    def test_event_beyond_total_rounds_is_rejected(self):
+        self.assertEqual(self.run_event(11, 10), [])
+        self.assertEqual(self.run_event(999, 10), [])
+        self.assertEqual(_check_event(event(round=999), {5: 2}, 10)[1], "round 999 is beyond the game's 10 round(s)")
+
+    def test_total_rounds_of_zero_rejects_every_event(self):
+        for round_no in (1, 7, 999):
+            self.assertEqual(self.run_event(round_no, 0), [], round_no)
+        self.assertEqual(_check_event(event(round=1), {5: 2}, 0)[1], "the game has no completed rounds")
+
+    def test_missing_or_invalid_total_rounds_is_rejected_not_assumed(self):
+        for bad in (None, "x", 2.5, True):
+            self.assertEqual(self.run_event(7, bad), [], repr(bad))
+        self.assertEqual(_validate_events([event()], self.ROWS), [])  # parameter omitted
+
+    def test_round_zero_and_negative_are_still_rejected(self):
+        self.assertEqual(self.run_event(0, 10), [])
+        self.assertEqual(self.run_event(-1, 10), [])
+
+    def test_only_events_within_the_game_survive_a_mixed_list(self):
+        out = _validate_events([event(round=3), event(round=50)], self.ROWS, 10)
+        self.assertEqual([e["round"] for e in out], [3])
 
 
 if __name__ == "__main__":

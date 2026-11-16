@@ -488,7 +488,7 @@ def save_results(session_id: UUID, payload: GameResult):
     # detects the consecutive mistakes). The backend only checks them for
     # plausibility against the per-level round data. Stored inside the existing
     # `analysis` JSONB, so no database migration is needed.
-    analysis["gameplay_difficulty_events"] = validate_events(payload.difficulty_events, payload.round_data)
+    analysis["gameplay_difficulty_events"] = validate_events(payload.difficulty_events, payload.round_data, payload.total_rounds)
 
     row = {
         "session_id": sid,

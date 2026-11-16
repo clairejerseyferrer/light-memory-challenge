@@ -81,7 +81,8 @@ class FirmwarePayloadTests(unittest.TestCase):
         data, text = self.payload(TWO_MISTAKES_MAIN)
         self.assertIn("LEVEL=4 SEQ=6", text)  # firmware really is at Level 4
         events = validate_events(normalize_difficulty_events_input(data["difficulty_events"]),
-                                 normalize_round_data(data["round_data"]))
+                                 normalize_round_data(data["round_data"]), data["total_rounds"])
+        self.assertEqual(events[0]["round"], data["total_rounds"])  # the drop happened on the final round
         self.assertEqual(len(events), 1)
         self.assertEqual((events[0]["from_level"], events[0]["to_level"]), (5, 4))
         self.assertIn("two mistakes at Level 5", events[0]["message"])
