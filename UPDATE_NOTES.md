@@ -11,15 +11,7 @@
 
 ## What changed
 
-## Current Intelligent System behavior (verified against the repository)
-
-- The post-game decision classifies the **highest level represented in the per-level telemetry**; it does not average the classifications from every level to choose the suggested difficulty.
-- Accuracy, time per button press, and failed-sequence rate determine the latest-level classification. The corresponding adjustment is bounded to the configured maximum game level and a minimum of Level 1.
-- One attempted sequence is sufficient for a provisional/low-confidence assessment; two or more attempts at that level give moderate confidence. No per-level telemetry produces no suggested level.
-- The personalized insight categories have separate evidence thresholds. For example, button-pattern, sequence-position, level-trend, and previous-session comparisons may be unavailable even when the overall assessment exists.
-- The previous-session comparison is optional and uses the previous completed session for the same codename when history is supplied; it does not train a model.
-
-- **Recommendations** (`backend/intelligent_system.py`): evidence-backed insights for problem buttons (count, share, levels), mistake position (first/middle/last third, compared with what even spread would give), deterioration at higher levels, input pace and closeness to the level time limit, and comparison with the previous completed session of the same codename. Output is organised into Overall Assessment, Strengths, Weaknesses, Personalized Recommendations and Suggested Difficulty. Every insight carries a confidence; low-confidence ones are labelled provisional. The accuracy/speed/mistake classification bands and adjustment rules are unchanged; the minimum evidence threshold was subsequently changed from the earlier three-sequence requirement to one sequence for a provisional assessment (see the follow-up update below). The old flat `recommendations` list is still returned.
+- **Recommendations** (`backend/intelligent_system.py`): evidence-backed insights for problem buttons (count, share, levels), mistake position (first/middle/last third, compared with what even spread would give), deterioration at higher levels, input pace and closeness to the level time limit, and comparison with the previous completed session of the same codename. Output is organised into Overall Assessment, Strengths, Weaknesses, Personalized Recommendations and Suggested Difficulty. Every insight carries a confidence; low-confidence ones are labelled provisional. The classification and difficulty rules themselves are unchanged. The old flat `recommendations` list is still returned.
 - **Timing wording**: per-level times are whole-sequence input times and the game-wide figure is the average time per button press. Neither is pure reaction speed, and the text says so. No firmware change was needed to collect timing.
 - **Ranking** (`backend/data_access.py`): the result's `ranking` is, and always was, the codename's leaderboard position. It is now also returned as `leaderboard` (rank, label, which session holds the entry, whether it is this session) and the dashboard/TFT label it "Leaderboard standing". Ranking order and one-entry-per-codename are unchanged. Tie-break timestamps are now compared as dates, not strings.
 - **Backend reliability**: real exceptions are logged with tracebacks and an error reference; users get specific, safe messages (503 for database connectivity, schema/migration wording only for genuine schema errors); `/api/health` now checks the database and reports the board as unknown unless it contacted the server recently; reads are retried with exponential backoff; writes are never blindly replayed; session creation is idempotent; leaderboard/history reads are paginated; player search no longer re-reads the leaderboard once per session.
@@ -68,7 +60,7 @@ The ESP32 now tracks cumulative statistics for every level played:
 
 The firmware sends compact JSON keys to keep the ESP32 offline queue manageable. `backend/main.py` expands those keys before storing the `round_data` JSONB value and passing it to the Intelligent System. The dashboard displays the per-level summary and individual incorrect press details.
 
-**Historical note — superseded by the follow-up update below:** the initial telemetry implementation required 3 attempted sequences for a meaningful classification. The later mobile-IS follow-up changed the live implementation to allow 1 sequence as a provisional/low-confidence assessment and 2 or more sequences as moderate confidence. The current `backend/intelligent_system.py` uses `MIN_SEQUENCES_FOR_CLASSIFICATION = 1`; do not use the earlier 3-sequence statement as the current behavior.
+The IS still requires at least 3 attempted sequences in a level before making a meaningful classification. It reports insufficient data instead of inventing a classification.
 
 ## Files changed
 
@@ -138,7 +130,7 @@ Copy the changed files above into the matching paths in your current repository.
 ## Follow-up update: mobile IS display, confidence, and idle abandonment
 
 - Replaced the wide per-level HTML table with responsive per-level metric cards and horizontal bars for accuracy and average sequence time. Detailed incorrect press positions are expandable per level.
-- Changed the IS minimum from 3 sequences to 1. A single sequence produces a **low-confidence/provisional** assessment; 2 or more produce **moderate confidence**. No per-level telemetry means no meaningful classification or suggested difficulty. This threshold applies to the overall/latest-level assessment and the per-level sufficiency labels; personalized insights retain their own evidence thresholds.
+- Changed the IS minimum from 3 sequences to 1. A single sequence produces a **low-confidence/provisional** assessment; 2 or more produce **moderate confidence**. No data still produces no classification.
 - Updated recommendations so applicable observations can be surfaced after one sequence, while retaining multi-observation requirements for repeated-button patterns and using at least two recorded incorrect positions for the late-sequence pattern.
 - Expanded authenticated `/api/device/abandon` to accept `waiting` as well as `countdown` and `playing`.
 - `/api/device/command` now returns the session UUID the physical button should target: active countdown/game first, otherwise the oldest waiting session.

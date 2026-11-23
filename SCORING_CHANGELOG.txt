@@ -27,13 +27,3 @@ Only the firmware scoring/deadline consistency and this changelog were changed.
 Hardware and live-backend tests are still required before deployment.
 
 Note 2026-11-14: scoring formulas and leaderboard ranking criteria were NOT changed by the later recommendation/ranking/reliability update.
-
-
-Current-source clarification (verified against firmware/src/LightMemoryChallenge.ino):
-- The formula above describes points awarded for an individual response; it is not
-  the post-game Intelligent System's suggested-difficulty calculation.
-- The firmware implements nearest-integer rounding using integer arithmetic
-  (half-up at the midpoint), rather than relying on a language-specific round()
-  implementation.
-- This changelog records the 2026-11-12 scoring correction; later gameplay
-  difficulty assistance and post-game IS recommendations are separate features.

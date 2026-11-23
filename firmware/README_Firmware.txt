@@ -7,8 +7,8 @@ Files
 
 Physical controls
 - GPIO15 is the ABANDON/RESET button. It is not a start button.
-- Hold GPIO15 for 2 seconds to abandon the board's target session. The target is the active countdown/game session, or (when idle) the oldest waiting session returned by the backend.
-- The player creates and starts a queued session from the website/phone only; GPIO15 never starts a game.
+- Hold GPIO15 for 2 seconds during countdown or gameplay to abandon the active session.
+- The player starts a queued session from the website/phone only.
 - The seven gameplay buttons are on GPIO 34, 35, 25, 26, 27, 32, and 33.
 - GPIO34 and GPIO35 are input-only and have no internal pull-ups. Add one external 10kΩ pull-up resistor from each pin to 3.3V; each corresponding button connects its GPIO to GND when pressed.
 - The seven LEDs are on GPIO 4, 5, 13, 14, 16, 17, and 19.

@@ -115,17 +115,8 @@ small. FastAPI expands them to descriptive field names before storing the
 result and running the Intelligent System. Average sequence time is divided by
 sequence length to derive average time per button press.
 
-The IS can classify a level after one attempted sequence, but that assessment
-is provisional/low confidence. Two or more attempted sequences produce
-moderate confidence. A level with no attempted sequence has no meaningful
-classification. The dashboard displays all level summaries, per-level
-classification sufficiency/confidence, and exact incorrect press positions.
+The IS does not infer a level classification until at least three sequences
+have been attempted at that level. The dashboard displays all level summaries,
+the per-level classification sufficiency, and exact incorrect press positions.
 No database column migration is required: the existing `game_results.round_data`
 JSONB column stores the expanded telemetry.
-
-The overall post-game classification and suggested difficulty use the highest
-level present in the submitted per-level telemetry. The suggestion is advice
-for the next game only; it does not change the current or completed game.
-Personalized insights have their own evidence thresholds, so an individual
-insight may remain unavailable even when the overall classification is
-provisional or available.
