@@ -169,6 +169,9 @@
       let sid = null;
       let poll = null;
       let timer = null;
+      // Invalidates any in-flight poll when timers are stopped or a session changes.
+      let pollGeneration = 0;
+      let isAbandoning = false;
       let countdownTarget = null;
       let duplicateCount = 0;
       let duplicateCheckedFor = "";
@@ -215,6 +218,9 @@
         })[c]);
       }
       function stopTimers() {
+        // clearInterval() does not cancel a request already in flight.
+        // Incrementing the generation makes that response stale.
+        pollGeneration++;
         if (poll) clearInterval(poll);
         if (timer) clearInterval(timer);
         poll = timer = null;
@@ -277,6 +283,7 @@
           });
           pendingCreate = { name: null, key: null };
           sid = d.session_id;
+          isAbandoning = false;
           localStorage.setItem(STORAGE_KEY, sid);
           stopTimers();
           resetResultsUI();
@@ -337,20 +344,30 @@
       };
 
       $("abandonButton").onclick = async () => {
-        if (!sid || !window.confirm("Abandon this session? This cannot be undone.")) return;
+        if (!sid || isAbandoning || !window.confirm("Abandon this session? This cannot be undone.")) return;
+        const abandoningSessionId = sid;
+        isAbandoning = true;
         $("abandonButton").disabled = true;
+        // Stop new polls and invalidate any poll that was already in flight.
+        stopTimers();
         try {
-          const d = await api(`/api/sessions/${sid}/abandon`, {
+          const d = await api(`/api/sessions/${abandoningSessionId}/abandon`, {
             method: "POST",
             body: "{}",
           });
-          stopTimers();
-          renderSession(d);
+          // Do not let this response affect a newer session if the user navigated
+          // or created another session while the request was pending.
+          if (sid !== abandoningSessionId) return;
+          renderSession({ ...d, status: "abandoned", session_id: abandoningSessionId });
           $("status").textContent = "Session abandoned. You can create a new session if needed.";
           localStorage.removeItem(STORAGE_KEY);
         } catch (err) {
-          $("status").textContent = err.message;
+          if (sid !== abandoningSessionId) return;
+          isAbandoning = false;
+          $("status").textContent = `Unable to abandon session: ${err.message}`;
           $("abandonButton").disabled = false;
+          // Resume status polling so the player can retry or see if the state changed.
+          startPolling();
         }
       };
 
@@ -414,9 +431,14 @@
       }
 
       async function pollSession() {
-        if (!sid) return;
+        if (!sid || isAbandoning) return;
+        const requestedSessionId = sid;
+        const requestedGeneration = pollGeneration;
         try {
-          const s = await api(`/api/sessions/${sid}`);
+          const s = await api(`/api/sessions/${requestedSessionId}`);
+          // Ignore stale responses: abandonment may have completed, timers may have
+          // stopped, or the player may have switched to another session meanwhile.
+          if (isAbandoning || sid !== requestedSessionId || pollGeneration !== requestedGeneration) return;
           renderSession(s);
           if (s.status === "completed" && s.result) {
             stopTimers();
@@ -424,14 +446,18 @@
           }
           if (s.status === "abandoned") {
             stopTimers();
+            isAbandoning = false;
             localStorage.removeItem(STORAGE_KEY);
           }
         } catch (err) {
+          if (isAbandoning || sid !== requestedSessionId || pollGeneration !== requestedGeneration) return;
           $("status").textContent = "Status check failed: " + err.message;
         }
       }
       function startPolling() {
         if (poll) clearInterval(poll);
+        // Each polling run gets a generation token so prior requests cannot render.
+        pollGeneration++;
         pollSession();
         poll = setInterval(pollSession, 1500);
       }
