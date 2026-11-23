@@ -22,6 +22,7 @@ Backend integration
 5. The physical abandon control calls authenticated POST /api/device/abandon with the exact device_id and session_id.
 6. If the backend is unreachable during abandonment, the ESP32 stores that exact session ID in Preferences and retries before accepting another start command.
 7. An abandoned session is not uploaded as a completed result and is excluded from the leaderboard.
+8. During a game, the ESP32 checks GET /api/sessions/{session_id} between rounds. If the website has abandoned the session, the game stops, nothing is uploaded, and the board returns to idle. Checks are never made while buttons are being read.
 
 Intelligent System telemetry
 The firmware records cumulative per-level telemetry:

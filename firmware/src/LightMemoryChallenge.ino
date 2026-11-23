@@ -177,6 +177,9 @@ bool abandonPressTiming = false;
 unsigned long abandonPressStartedAt = 0;
 bool abandonHoldReported = false;
 char pendingAbandonId[40] = "";
+// How often the board asks the backend whether the website abandoned the running session.
+const unsigned long REMOTE_CHECK_INTERVAL_MS = 1500;
+unsigned long lastRemoteCheckMs = 0;
 
 int sequence[MAX_SEQUENCE];
 int playerInput[MAX_SEQUENCE];
@@ -194,7 +197,7 @@ WiFiClient plainClient;
 WiFiClientSecure secureClient;
 
 enum Outcome { OUT_DELIVERED, OUT_RETRY, OUT_DISCARD };
-enum StartResult { START_OK, START_UNREACHABLE, START_REJECTED };
+enum StartResult { START_OK, START_UNREACHABLE, START_REJECTED, START_ABANDONED };
 enum IdleStatus { IDLE_NONE, IDLE_READY, IDLE_NO_WIFI, IDLE_NO_SERVER, IDLE_BAD_TOKEN };
 Outcome lastOutcome = OUT_RETRY;
 int lastRank = -1;
@@ -214,6 +217,7 @@ int waitForButtonPress(unsigned long roundStart, unsigned long limitMs, bool &ti
 bool checkPhysicalAbandon();
 bool delayWithAbandon(unsigned long durationMs);
 bool sendDeviceAbandon();
+bool remoteSessionAbandoned();
 void clearCurrentSession();
 void clearPendingAbandon();
 void checkInput();
@@ -366,6 +370,14 @@ void playSession() {
   // Tell the server the game really started. 'not arrived' replies mean
   // our clock is a little early, so we wait and try again.
   StartResult sr = confirmStarted(currentSessionId, 8);
+  if (sr == START_ABANDONED) {
+    // The website abandoned this session during the countdown.
+    showMessage("SESSION RESET", "Abandoned on website");
+    playTone(300, 400);
+    delay(1500);
+    clearCurrentSession();
+    return;
+  }
   if (sr == START_REJECTED) {
     showMessage("SESSION ERROR", "Ask the operator");
     playTone(300, 400);
@@ -382,7 +394,9 @@ void playSession() {
   resetGame();
   gameStartMs = millis();
 
+  lastRemoteCheckMs = millis();   // the start was just confirmed; first remote check happens on a later round
   while (lives > 0 && !allLevelsCleared && !sessionAbandoned) {
+    if (remoteSessionAbandoned()) break;   // website abandoned the session
     generateRandomSequence();
     if (!displaySequenceUsingLEDs()) break;
     if (!getPlayerInput()) break;
@@ -482,6 +496,30 @@ bool sendDeviceAbandon() {
   if (code == 401 || code == 403) showIdle(IDLE_BAD_TOKEN);
   else showIdle(IDLE_NO_SERVER);
   return false;
+}
+
+// Has the website abandoned the session this board is running?
+// Only call this between rounds, never while waiting for buttons or showing LEDs:
+// each request opens a fresh connection and can take hundreds of milliseconds.
+bool remoteSessionAbandoned() {
+  if (!currentSessionId[0] || sessionAbandoned) return sessionAbandoned;
+  if (millis() - lastRemoteCheckMs < REMOTE_CHECK_INTERVAL_MS) return false;
+  lastRemoteCheckMs = millis();
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  char path[96];
+  snprintf(path, sizeof(path), "/api/sessions/%s", currentSessionId);
+  String body;
+  int code = httpRequest("GET", path, NULL, &body);
+  if (!isSuccess(code)) return false;          // offline: keep playing, check again later
+
+  char status[16] = "";
+  if (!jsonGetString(body.c_str(), "status", status, sizeof(status))) return false;
+  if (strcmp(status, "abandoned") != 0) return false;
+
+  Serial.printf("Session %s abandoned from website\n", currentSessionId);
+  sessionAbandoned = true;   // every delayWithAbandon()/wait loop now exits immediately
+  return true;
 }
 
 void clearPendingAbandon() {
@@ -1019,6 +1057,7 @@ StartResult confirmStarted(const char* sid, int attempts) {
       const char* r = resp.c_str();
       if (strstr(r, "not arrived")) { delay(500); continue; }          // our clock is a bit early
       if (strstr(r, "status: playing") || strstr(r, "already updated")) return START_OK;
+      if (strstr(r, "status: abandoned")) return START_ABANDONED;          // abandoned on the website
       return START_REJECTED;                                           // completed / abandoned ...
     }
     if (code == 404 || code == 422) return START_REJECTED;
